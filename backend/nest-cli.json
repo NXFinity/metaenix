@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "webpack": false,
+    "assets": [
+      {
+        "include": "**/*.png",
+        "outDir": "dist/src"
+      },
+      {
+        "include": "**/*.jpg",
+        "outDir": "dist/src"
+      },
+      {
+        "include": "**/*.html",
+        "outDir": "dist/src"
+      }
+    ],
+    "watchAssets": true
+  },
+  "projects": {
+    "caching": {
+      "type": "library",
+      "root": "libs/caching",
+      "entryFile": "index",
+      "sourceRoot": "libs/caching/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/caching/tsconfig.lib.json"
+      }
+    },
+    "database": {
+      "type": "library",
+      "root": "libs/database",
+      "entryFile": "index",
+      "sourceRoot": "libs/database/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/database/tsconfig.lib.json",
+        "assets": [
+          {
+            "include": "seed/json/**/*.json",
+            "watchAssets": true
+          },
+          {
+            "include": "**/*.json",
+            "exclude": "**/*.spec.json",
+            "watchAssets": true
+          }
+        ]
+      }
+    },
+    "email": {
+      "type": "library",
+      "root": "libs/email",
+      "entryFile": "index",
+      "sourceRoot": "libs/email/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/email/tsconfig.lib.json"
+      }
+    },
+    "kafka": {
+      "type": "library",
+      "root": "libs/kafka",
+      "entryFile": "index",
+      "sourceRoot": "libs/kafka/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/kafka/tsconfig.lib.json"
+      }
+    },
+    "logging": {
+      "type": "library",
+      "root": "libs/logging",
+      "entryFile": "index",
+      "sourceRoot": "libs/logging/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/logging/tsconfig.lib.json"
+      }
+    },
+    "redis": {
+      "type": "library",
+      "root": "libs/redis",
+      "entryFile": "index",
+      "sourceRoot": "libs/redis/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/redis/tsconfig.lib.json"
+      }
+    },
+    "throttle": {
+      "type": "library",
+      "root": "libs/throttle",
+      "entryFile": "index",
+      "sourceRoot": "libs/throttle/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/throttle/tsconfig.lib.json"
+      }
+    }
+  }
+}
