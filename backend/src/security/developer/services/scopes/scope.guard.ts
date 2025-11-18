@@ -7,7 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { ScopeService } from './scope.service';
 import { REQUIRE_SCOPE_KEY } from './decorators/require-scope.decorator';
-import { IS_PUBLIC_KEY } from '../../../auth/decorators/public.decorator';
+// import { IS_PUBLIC_KEY } from '../../../auth/decorators/public.decorator'; // Reserved for future use
 
 @Injectable()
 export class ScopeGuard implements CanActivate {

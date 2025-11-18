@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '@redis/redis';
-import { LoggingService, LogCategory, AuditLogService, LogLevel } from '@logging/logging';
+import { LogCategory, AuditLogService, LogLevel } from '@logging/logging';
 
 export interface SecurityEvent {
   type: 'failed_login' | 'suspicious_activity' | 'rate_limit_exceeded' | 'unauthorized_access' | '2fa_failed' | 'password_reset' | 'account_locked';
@@ -37,7 +37,7 @@ export class SecurityMonitorService {
 
   constructor(
     private readonly redisService: RedisService,
-    private readonly loggingService: LoggingService,
+    // private readonly loggingService: LoggingService, // Reserved for future logging
     private readonly auditLogService: AuditLogService,
   ) {}
 

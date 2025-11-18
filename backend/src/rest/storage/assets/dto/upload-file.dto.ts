@@ -9,7 +9,7 @@ export class UploadFileDto {
     example: StorageType.PROFILE,
   })
   @IsEnum(StorageType)
-  storageType: StorageType;
+  storageType!: StorageType;
 
   @ApiProperty({
     description: 'Sub-type for profile images (avatar, cover, offline, chat)',
@@ -38,32 +38,32 @@ export class UploadResponseDto {
     description: 'File URL in Digital Ocean Spaces',
     example: 'https://lon1.digitaloceanspaces.com/bucket/userId/profile/avatar/image.jpg',
   })
-  url: string;
+  url!: string;
 
   @ApiProperty({
     description: 'File key/path in storage',
     example: 'userId/profile/avatar/image.jpg',
   })
-  key: string;
+  key!: string;
 
   @ApiProperty({
     description: 'File size in bytes',
     example: 1024000,
   })
-  size: number;
+  size!: number;
 
   @ApiProperty({
     description: 'MIME type of the file',
     example: 'image/jpeg',
   })
-  mimeType: string;
+  mimeType!: string;
 
   @ApiProperty({
     description: 'Storage type',
     enum: StorageType,
     example: StorageType.PROFILE,
   })
-  storageType: StorageType;
+  storageType!: StorageType;
 
   @ApiProperty({
     description: 'Sub-type if applicable',

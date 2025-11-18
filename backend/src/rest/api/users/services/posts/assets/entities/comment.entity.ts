@@ -20,36 +20,36 @@ export class Comment extends BaseEntity {
   // Comment Content
   // #########################################################
   @Column({ type: 'text', nullable: false })
-  content: string;
+  content!: string;
 
   @Column({ type: 'boolean', default: false })
-  isEdited: boolean;
+  isEdited!: boolean;
 
   // #########################################################
   // Comment Statistics
   // #########################################################
   @Column({ type: 'int', default: 0 })
-  likesCount: number;
+  likesCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  repliesCount: number;
+  repliesCount!: number;
 
   // #########################################################
   // Relationships
   // #########################################################
   @ManyToOne(() => Post, (post) => post.comments, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'postId' })
-  post: Post;
+  post!: Post;
 
   @Column({ nullable: false })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   // Comment can be a reply to another comment
   @ManyToOne(() => Comment, (comment) => comment.replies, {
@@ -57,17 +57,17 @@ export class Comment extends BaseEntity {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'parentCommentId' })
-  parentComment: Comment | null;
+  parentComment!: Comment | null;
 
   @Column({ nullable: true })
-  parentCommentId: string | null;
+  parentCommentId!: string | null;
 
   @OneToMany(() => Comment, (comment) => comment.parentComment, {
     cascade: true,
   })
-  replies: Comment[];
+  replies!: Comment[];
 
   // Likes on this comment
   @OneToMany(() => Like, (like) => like.comment, { cascade: true })
-  likes: Like[];
+  likes!: Like[];
 }

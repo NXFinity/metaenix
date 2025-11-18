@@ -4,11 +4,11 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
-import * as bcrypt from 'bcrypt';
+// import * as bcrypt from 'bcrypt'; // Reserved for future use
 import { OAuthToken } from '../../assets/entities/oauth-token.entity';
-import { Application } from '../../assets/entities/application.entity';
+// import { Application } from '../../assets/entities/application.entity'; // Reserved for future use
 import { ApplicationStatus } from '../../assets/enum/application-status.enum';
-import { User } from '../../../../rest/api/users/assets/entities/user.entity';
+// import { User } from '../../../../rest/api/users/assets/entities/user.entity'; // Reserved for future use
 
 interface OAuthPayload {
   sub: string;
@@ -21,14 +21,16 @@ interface OAuthPayload {
 
 @Injectable()
 export class OAuthStrategy extends PassportStrategy(Strategy, 'oauth') {
+  private readonly oauthTokenRepository: Repository<OAuthToken>;
+
   constructor(
-    private configService: ConfigService,
+    configService: ConfigService,
     @InjectRepository(OAuthToken)
-    private readonly oauthTokenRepository: Repository<OAuthToken>,
-    @InjectRepository(Application)
-    private readonly applicationRepository: Repository<Application>,
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    oauthTokenRepository: Repository<OAuthToken>,
+    // @InjectRepository(Application)
+    // private readonly applicationRepository: Repository<Application>, // Reserved for future use
+    // @InjectRepository(User)
+    // private readonly userRepository: Repository<User>, // Reserved for future use
   ) {
     const jwtSecret = configService.get<string>('JWT_SECRET');
     if (!jwtSecret) {
@@ -39,6 +41,7 @@ export class OAuthStrategy extends PassportStrategy(Strategy, 'oauth') {
       ignoreExpiration: false,
       secretOrKey: jwtSecret,
     });
+    this.oauthTokenRepository = oauthTokenRepository;
   }
 
   async validate(payload: OAuthPayload) {

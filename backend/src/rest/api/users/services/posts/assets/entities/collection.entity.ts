@@ -16,27 +16,27 @@ import { User } from '../../../../assets/entities/user.entity';
 @Index(['userId', 'isPublic']) // Composite index for user's public/private collections
 export class Collection extends BaseEntity {
   @Column({ type: 'varchar', length: 200, nullable: false })
-  name: string;
+  name!: string;
 
   @Column({ type: 'text', nullable: true })
-  description: string | null;
+  description!: string | null;
 
   @Column({ type: 'boolean', default: false })
-  isPublic: boolean;
+  isPublic!: boolean;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  coverImage: string | null;
+  coverImage!: string | null;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   @ManyToMany(() => Post, (post) => post.collections)
-  posts: Post[];
+  posts!: Post[];
 
   @Column({ type: 'int', default: 0 })
-  postsCount: number;
+  postsCount!: number;
 }

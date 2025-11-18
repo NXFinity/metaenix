@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, Length } from 'class-validator';
 
 export class VerifyLogin2faDto {
   @ApiProperty({
@@ -8,7 +8,7 @@ export class VerifyLogin2faDto {
   })
   @IsNotEmpty()
   @IsString()
-  email: string;
+  email!: string;
 
   @ApiProperty({
     description: '6-digit TOTP code or backup code',
@@ -17,7 +17,7 @@ export class VerifyLogin2faDto {
   @IsNotEmpty()
   @IsString()
   @Length(6, 10)
-  code: string;
+  code!: string;
 
   @ApiProperty({
     description: 'Temporary token received from login endpoint when 2FA is required',
@@ -25,6 +25,6 @@ export class VerifyLogin2faDto {
   })
   @IsNotEmpty()
   @IsString()
-  tempToken: string;
+  tempToken!: string;
 }
 

@@ -12,8 +12,8 @@ import { DistributedLockOptions, RateLimitOptions } from './interfaces/cache-opt
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
-  private client: Redis | Cluster;
-  private subscriber: Redis | null = null;
+  private client!: Redis | Cluster;
+  // private subscriber: Redis | null = null; // Reserved for future pub/sub functionality
   private isConnected = false;
   public readonly keyBuilder: KeyBuilder;
 
@@ -1589,7 +1589,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Track cache hit
    */
-  async trackCacheHit(key: string): Promise<void> {
+  async trackCacheHit(_key: string): Promise<void> {
     const metricsKey = this.keyBuilder.build('metrics', 'cache', 'hits');
     await this.incr(metricsKey);
     await this.expire(metricsKey, 86400); // 24 hours
@@ -1598,7 +1598,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Track cache miss
    */
-  async trackCacheMiss(key: string): Promise<void> {
+  async trackCacheMiss(_key: string): Promise<void> {
     const metricsKey = this.keyBuilder.build('metrics', 'cache', 'misses');
     await this.incr(metricsKey);
     await this.expire(metricsKey, 86400); // 24 hours

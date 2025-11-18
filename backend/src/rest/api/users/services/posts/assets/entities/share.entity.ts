@@ -12,22 +12,22 @@ export class Share extends BaseEntity {
   // Share Content
   // #########################################################
   @Column({ type: 'text', nullable: true })
-  comment: string | null;
+  comment!: string | null;
 
   // #########################################################
   // Relationships
   // #########################################################
   @ManyToOne(() => Post, (post) => post.shares, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'postId' })
-  post: Post;
+  post!: Post;
 
   @Column({ nullable: false })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 }

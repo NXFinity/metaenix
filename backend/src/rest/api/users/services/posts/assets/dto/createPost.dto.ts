@@ -20,7 +20,7 @@ export class CreatePostDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(10000, { message: 'Content cannot exceed 10000 characters' })
-  content: string;
+  content!: string;
 
   @ApiProperty({
     description: 'Single media URL (image/video)',
@@ -144,7 +144,7 @@ export class CreateCommentDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(5000, { message: 'Comment cannot exceed 5000 characters' })
-  content: string;
+  content!: string;
 
   @ApiProperty({
     description: 'ID of parent comment if this is a reply',

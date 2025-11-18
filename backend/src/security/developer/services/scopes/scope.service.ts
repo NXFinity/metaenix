@@ -6,7 +6,7 @@ import {
   getScopesByCategory,
   getDefaultScopes,
   getScopesRequiringApproval,
-  isValidScope,
+  // isValidScope, // Reserved for future use
   getScopeDefinition,
   validateScopes,
 } from '../../assets/config/scopes.config';

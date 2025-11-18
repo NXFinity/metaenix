@@ -8,12 +8,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
+// import { ConfigService } from '@nestjs/config'; // Reserved for future use
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { Application } from '../../assets/entities/application.entity';
 import { OAuthToken } from '../../assets/entities/oauth-token.entity';
-import { User } from '../../../../rest/api/users/assets/entities/user.entity';
+// import { User } from '../../../../rest/api/users/assets/entities/user.entity'; // Reserved for future use
 import {
   AuthorizeDto,
   TokenDto,
@@ -27,6 +27,7 @@ import { BCRYPT_SALT_ROUNDS } from '../../../../common/constants/app.constants';
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { ScopeService } from '../scopes/scope.service';
+import { RedisService } from '@redis/redis';
 
 @Injectable()
 export class OAuthService {
@@ -39,12 +40,13 @@ export class OAuthService {
     private readonly applicationRepository: Repository<Application>,
     @InjectRepository(OAuthToken)
     private readonly oauthTokenRepository: Repository<OAuthToken>,
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    // @InjectRepository(User)
+    // private readonly userRepository: Repository<User>, // Reserved for future use
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    // private readonly configService: ConfigService, // Reserved for future use
     private readonly loggingService: LoggingService,
     private readonly scopeService: ScopeService,
+    private readonly redisService: RedisService,
   ) {}
 
   /**
@@ -286,21 +288,31 @@ export class OAuthService {
       throw new BadRequestException('Refresh token is required');
     }
 
-    // Find token by hashed refresh token
-    const tokens = await this.oauthTokenRepository.find({
-      where: { revoked: false },
+    // Generate SHA-256 hash for fast indexed lookup
+    const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+    // Find token by hash using indexed column (fast lookup - O(1) instead of O(n))
+    const oauthToken = await this.oauthTokenRepository.findOne({
+      where: { refreshTokenHash, revoked: false },
       relations: ['application', 'user'],
     });
 
-    let oauthToken: OAuthToken | null = null;
-    for (const token of tokens) {
-      if (token.refreshToken && (await bcrypt.compare(refreshToken, token.refreshToken))) {
-        oauthToken = token;
-        break;
-      }
+    if (!oauthToken) {
+      throw new UnauthorizedException('Invalid refresh token');
     }
 
-    if (!oauthToken) {
+    // Verify with bcrypt for security (defense in depth)
+    if (!oauthToken.refreshToken || !(await bcrypt.compare(refreshToken, oauthToken.refreshToken))) {
+      // Hash matched but bcrypt verification failed (shouldn't happen, but security check)
+      this.loggingService.error(
+        'Refresh token hash collision detected',
+        undefined,
+        'OAuthService',
+        {
+          category: LogCategory.SECURITY,
+          metadata: { tokenId: oauthToken.id },
+        },
+      );
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -435,12 +447,19 @@ export class OAuthService {
     });
 
     // Hash tokens before storing
+    // Use bcrypt for secure storage (slow, but secure for verification)
     const hashedAccessToken = await bcrypt.hash(accessToken, BCRYPT_SALT_ROUNDS);
     const hashedRefreshToken = await bcrypt.hash(refreshToken, BCRYPT_SALT_ROUNDS);
+
+    // Generate SHA-256 hashes for fast indexed lookup (performance optimization)
+    const accessTokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+    const refreshTokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
 
     // Save token to database
     oauthToken.accessToken = hashedAccessToken;
     oauthToken.refreshToken = hashedRefreshToken;
+    oauthToken.accessTokenHash = accessTokenHash;
+    oauthToken.refreshTokenHash = refreshTokenHash;
     oauthToken.expiresAt = expiresAt;
     oauthToken.refreshExpiresAt = refreshExpiresAt;
     oauthToken.code = null; // Clear authorization code
@@ -472,25 +491,38 @@ export class OAuthService {
   async revoke(revokeDto: RevokeDto): Promise<void> {
     const { token } = revokeDto;
 
-    // Find token by hashed access token or refresh token
-    const tokens = await this.oauthTokenRepository.find({
-      where: { revoked: false },
-    });
+    // Generate SHA-256 hash for fast indexed lookup
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    let oauthToken: OAuthToken | null = null;
-    for (const t of tokens) {
-      if (t.accessToken && (await bcrypt.compare(token, t.accessToken))) {
-        oauthToken = t;
-        break;
-      }
-      if (t.refreshToken && (await bcrypt.compare(token, t.refreshToken))) {
-        oauthToken = t;
-        break;
-      }
-    }
+    // Find token by hash using indexed column (fast lookup)
+    const oauthToken = await this.oauthTokenRepository.findOne({
+      where: [
+        { accessTokenHash: tokenHash, revoked: false },
+        { refreshTokenHash: tokenHash, revoked: false },
+      ],
+      relations: ['application', 'user'],
+    });
 
     if (!oauthToken) {
       // Return success even if token not found (security best practice)
+      return;
+    }
+
+    // Verify with bcrypt for security (defense in depth)
+    const isAccessToken = oauthToken.accessToken && await bcrypt.compare(token, oauthToken.accessToken);
+    const isRefreshToken = oauthToken.refreshToken && await bcrypt.compare(token, oauthToken.refreshToken);
+
+    if (!isAccessToken && !isRefreshToken) {
+      // Hash matched but bcrypt verification failed (shouldn't happen, but security check)
+      this.loggingService.error(
+        'Token hash collision detected',
+        undefined,
+        'OAuthService',
+        {
+          category: LogCategory.SECURITY,
+          metadata: { tokenId: oauthToken.id },
+        },
+      );
       return;
     }
 
@@ -526,27 +558,83 @@ export class OAuthService {
       }
     } catch (error) {
       // Not a JWT, continue to database lookup
+      // Track metrics for JWT decode failures
+      const metricsKey = 'oauth:metrics:jwt_decode_failures';
+      try {
+        await this.redisService.incr(metricsKey);
+        // Set TTL to 24 hours if this is the first increment
+        const count = await this.redisService.get<number>(metricsKey, false);
+        if (count === 1) {
+          await this.redisService.expire(metricsKey, 86400); // 24 hours
+        }
+      } catch (metricsError) {
+        // Don't fail the request if metrics tracking fails
+        this.loggingService.warn(
+          'Failed to track JWT decode failure metrics',
+          'OAuthService',
+          {
+            category: LogCategory.SYSTEM,
+            metadata: {
+              error: metricsError instanceof Error ? metricsError.message : String(metricsError),
+            },
+          },
+        );
+      }
+
+      // Log at debug level for normal operation
+      this.loggingService.debug('JWT decode failed, using database lookup', 'OAuthService', {
+        category: LogCategory.SECURITY,
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          tokenLength: token.length,
+          tokenPrefix: token.substring(0, Math.min(10, token.length)), // First 10 chars for pattern detection
+        },
+      });
+
+      // Log at info level for security monitoring (potential attacks or misconfigurations)
+      this.loggingService.log('JWT decode failed during token introspection', 'OAuthService', {
+        category: LogCategory.SECURITY,
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.constructor.name : typeof error,
+          tokenLength: token.length,
+          tokenPrefix: token.substring(0, Math.min(10, token.length)), // First 10 chars for pattern detection
+          timestamp: new Date().toISOString(),
+        },
+      });
     }
 
-    // Find token in database
-    const tokens = await this.oauthTokenRepository.find({
-      where: { revoked: false },
+    // Generate SHA-256 hash for fast indexed lookup
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Find token by hash using indexed column (fast lookup - O(1) instead of O(n))
+    const oauthToken = await this.oauthTokenRepository.findOne({
+      where: [
+        { accessTokenHash: tokenHash, revoked: false },
+        { refreshTokenHash: tokenHash, revoked: false },
+      ],
       relations: ['application', 'user'],
     });
 
-    let oauthToken: OAuthToken | null = null;
-    for (const t of tokens) {
-      if (t.accessToken && (await bcrypt.compare(token, t.accessToken))) {
-        oauthToken = t;
-        break;
-      }
-      if (t.refreshToken && (await bcrypt.compare(token, t.refreshToken))) {
-        oauthToken = t;
-        break;
-      }
+    if (!oauthToken) {
+      return { active: false };
     }
 
-    if (!oauthToken) {
+    // Verify with bcrypt for security (defense in depth)
+    const isAccessToken = oauthToken.accessToken && await bcrypt.compare(token, oauthToken.accessToken);
+    const isRefreshToken = oauthToken.refreshToken && await bcrypt.compare(token, oauthToken.refreshToken);
+
+    if (!isAccessToken && !isRefreshToken) {
+      // Hash matched but bcrypt verification failed (shouldn't happen, but security check)
+      this.loggingService.error(
+        'Token hash collision detected',
+        undefined,
+        'OAuthService',
+        {
+          category: LogCategory.SECURITY,
+          metadata: { tokenId: oauthToken.id },
+        },
+      );
       return { active: false };
     }
 

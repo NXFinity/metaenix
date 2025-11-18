@@ -5,6 +5,9 @@ import {
   IsEnum,
   IsDateString,
   MaxLength,
+  IsNotEmpty,
+  MinLength,
+  IsUrl,
 } from 'class-validator';
 
 export class BookmarkPostDto {
@@ -45,7 +48,7 @@ export class ReportPostDto {
     'inappropriate_content',
     'other',
   ])
-  reason:
+  reason!:
     | 'spam'
     | 'harassment'
     | 'hate_speech'
@@ -73,7 +76,7 @@ export class ReactToPostDto {
     example: 'love',
   })
   @IsEnum(['like', 'love', 'laugh', 'wow', 'sad', 'angry'])
-  reactionType: 'like' | 'love' | 'laugh' | 'wow' | 'sad' | 'angry';
+  reactionType!: 'like' | 'love' | 'laugh' | 'wow' | 'sad' | 'angry';
 }
 
 export class CreateCollectionDto {
@@ -83,8 +86,10 @@ export class CreateCollectionDto {
     maxLength: 200,
   })
   @IsString()
+  @IsNotEmpty()
   @MaxLength(200)
-  name: string;
+  @MinLength(1)
+  name!: string;
 
   @ApiProperty({
     description: 'Collection description',
@@ -93,6 +98,7 @@ export class CreateCollectionDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   description?: string;
 
   @ApiProperty({
@@ -110,7 +116,8 @@ export class CreateCollectionDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsUrl()
+  @MaxLength(500)
   coverImage?: string;
 }
 
@@ -120,6 +127,6 @@ export class SchedulePostDto {
     example: '2025-12-25T10:00:00Z',
   })
   @IsDateString()
-  scheduledDate: string;
+  scheduledDate!: string;
 }
 

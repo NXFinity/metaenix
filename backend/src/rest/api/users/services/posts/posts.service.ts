@@ -2365,7 +2365,7 @@ export class PostsService {
   /**
    * Track post view (increment viewsCount)
    */
-  async trackPostView(postId: string, userId?: string): Promise<void> {
+  async trackPostView(postId: string, _userId?: string): Promise<void> {
     try {
       const post = await this.postRepository.findOne({
         where: { id: postId },

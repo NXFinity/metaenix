@@ -99,7 +99,8 @@ export class HealthController {
             },
           };
         } catch (error) {
-          throw new Error(`Redis health check failed: ${error.message}`);
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          throw new Error(`Redis health check failed: ${message}`);
         }
       },
     ]);

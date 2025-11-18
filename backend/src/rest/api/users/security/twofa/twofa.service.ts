@@ -19,10 +19,10 @@ import { LogCategory } from '@logging/logging';
 import { AuditLogService } from '@logging/logging';
 import { RedisService } from '@redis/redis';
 import {
-  SetupTwoFactorDto,
+  // SetupTwoFactorDto, // Reserved for future use
   EnableTwoFactorDto,
   VerifyTwoFactorDto,
-  DisableTwoFactorDto,
+  // DisableTwoFactorDto, // Reserved for future use
 } from './assets/dto';
 import {
   TwoFactorSetupResponse,
@@ -34,8 +34,8 @@ export class TwofaService {
   private readonly encryptionKey: Buffer;
   private readonly encryptionAlgorithm = 'aes-256-gcm';
   private readonly ivLength = 16;
-  private readonly authTagLength = 16;
-  private readonly saltLength = 64;
+  // private readonly authTagLength = 16; // Reserved for future use
+  // private readonly saltLength = 64; // Reserved for future use
 
   constructor(
     @InjectRepository(Security)

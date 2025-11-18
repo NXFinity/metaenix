@@ -13,7 +13,11 @@ import { JwtPayload } from '../interfaces/jwt-payload.interface';
  */
 @Injectable()
 export class RefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
-  constructor(private configService: ConfigService) {
+  constructor(configService: ConfigService) {
+    const refreshSecret = configService.get<string>('REFRESH_TOKEN_SECRET');
+    if (!refreshSecret) {
+      throw new Error('REFRESH_TOKEN_SECRET environment variable is required');
+    }
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         (request: Request) => {
@@ -22,13 +26,7 @@ export class RefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
         },
       ]),
       ignoreExpiration: false,
-      secretOrKey: (() => {
-        const refreshSecret = configService.get<string>('REFRESH_TOKEN_SECRET');
-        if (!refreshSecret) {
-          throw new Error('REFRESH_TOKEN_SECRET environment variable is required');
-        }
-        return refreshSecret;
-      })(),
+      secretOrKey: refreshSecret,
       passReqToCallback: true, // Pass request to validate method
     });
   }

@@ -13,7 +13,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export class BaseEntity {
   @ApiProperty({ example: 'uuid' })
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @BeforeInsert()
   createUuid() {
@@ -22,7 +22,7 @@ export class BaseEntity {
 
   @ApiProperty()
   @CreateDateColumn({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
-  dateCreated: Date;
+  dateCreated!: Date;
 
   @ApiProperty()
   @UpdateDateColumn({
@@ -30,9 +30,9 @@ export class BaseEntity {
     default: () => 'CURRENT_TIMESTAMP',
     onUpdate: 'CURRENT_TIMESTAMP',
   })
-  dateUpdated: Date;
+  dateUpdated!: Date;
 
   @ApiProperty({ nullable: true })
   @DeleteDateColumn({ type: 'timestamptz', nullable: true })
-  dateDeleted: Date;
+  dateDeleted!: Date;
 }

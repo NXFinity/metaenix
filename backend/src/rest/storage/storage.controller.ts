@@ -7,7 +7,7 @@ import {
   UploadedFile,
   Body,
   BadRequestException,
-  UseGuards,
+  // UseGuards, // Reserved for future use
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {

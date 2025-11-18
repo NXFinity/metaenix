@@ -29,7 +29,7 @@ export class DeveloperWebsocketGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(DeveloperWebsocketGateway.name);
   private readonly connectedApps = new Map<string, AuthenticatedAppSocket>(); // websocketId -> socket
@@ -409,7 +409,7 @@ export class DeveloperWebsocketGateway
    */
   private broadcastToSubscribedApps(eventName: string, payload: any) {
     let count = 0;
-    for (const [websocketId, socket] of this.connectedApps.entries()) {
+    for (const [_websocketId, socket] of this.connectedApps.entries()) {
       if (socket.subscribedEvents?.has(eventName)) {
         socket.emit('event', {
           type: eventName,

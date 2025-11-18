@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, MaxLength, IsUrl } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum GrantType {
@@ -15,7 +15,7 @@ export class TokenDto {
   })
   @IsEnum(GrantType)
   @IsNotEmpty()
-  grantType: GrantType;
+  grantType!: GrantType;
 
   @ApiPropertyOptional({
     description: 'Client ID (required for authorization_code and client_credentials)',
@@ -23,6 +23,7 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   clientId?: string;
 
   @ApiPropertyOptional({
@@ -31,6 +32,7 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   clientSecret?: string;
 
   @ApiPropertyOptional({
@@ -39,14 +41,16 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   code?: string;
 
   @ApiPropertyOptional({
     description: 'Redirect URI (required for authorization_code grant)',
     example: 'https://example.com/callback',
   })
-  @IsString()
+  @IsUrl({ require_protocol: true })
   @IsOptional()
+  @MaxLength(500)
   redirectUri?: string;
 
   @ApiPropertyOptional({
@@ -55,6 +59,7 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   codeVerifier?: string;
 
   @ApiPropertyOptional({
@@ -63,6 +68,7 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   refreshToken?: string;
 
   @ApiPropertyOptional({
@@ -71,6 +77,7 @@ export class TokenDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   scope?: string;
 }
 

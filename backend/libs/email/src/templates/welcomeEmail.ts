@@ -1,7 +1,7 @@
 export function getWelcomeEmailTemplate(
   username: string,
   frontendUrl: string,
-  userId?: string,
+  _userId?: string,
 ): string {
   return `
     <!DOCTYPE html>

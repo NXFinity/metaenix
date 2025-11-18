@@ -59,7 +59,7 @@ export class OAuthRateLimitService {
     try {
       // Use sliding window algorithm with sorted sets
       const now = Math.floor(Date.now() / 1000); // Current Unix timestamp in seconds
-      const windowStart = now - window; // Start of sliding window
+      // const windowStart = now - window; // Start of sliding window - Reserved for future use
 
       // Use Redis Lua script for atomic operations
       const script = `

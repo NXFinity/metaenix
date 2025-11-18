@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty } from 'class-validator';
+import { IsNotEmpty, IsString, MinLength, MaxLength } from 'class-validator';
 
 export class SetupTwoFactorDto {
   @ApiProperty({
@@ -7,6 +7,9 @@ export class SetupTwoFactorDto {
     example: 'SecurePassword123!',
   })
   @IsNotEmpty()
-  password: string;
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  password!: string;
 }
 

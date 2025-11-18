@@ -264,7 +264,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
           ...(partition !== undefined && { partition }),
         });
 
-        result.forEach((metadata, index) => {
+        result.forEach((metadata) => {
           const originalMessage = messages.find(
             (m) => m.topic === topic && m.partition === partition
           );

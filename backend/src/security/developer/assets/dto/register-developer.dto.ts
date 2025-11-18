@@ -7,6 +7,6 @@ export class RegisterDeveloperDto {
     example: true,
   })
   @IsBoolean()
-  acceptTerms: boolean;
+  acceptTerms!: boolean;
 }
 

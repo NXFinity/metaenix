@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsNotEmpty, IsString, Length } from 'class-validator';
 
 export class VerifyTwoFactorDto {
   @ApiProperty({
@@ -9,6 +9,6 @@ export class VerifyTwoFactorDto {
   @IsNotEmpty()
   @IsString()
   @Length(6, 10)
-  code: string;
+  code!: string;
 }
 

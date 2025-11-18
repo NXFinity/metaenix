@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CreateUserDto, UpdateUserDto } from './assets/dto/createUser.dto';
+import { UpdateUserDto } from './assets/dto/createUser.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './assets/entities/user.entity';
 import { Repository } from 'typeorm';
@@ -24,22 +24,22 @@ import {
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { CachingService } from '@caching/caching';
-import { FollowsService } from './services/follows/follows.service';
+// import { FollowsService } from './services/follows/follows.service'; // Reserved for future use
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly userRepository: Repository<User>,
-    @InjectRepository(Profile)
-    private readonly profileRepository: Repository<Profile>,
-    @InjectRepository(Privacy)
-    private readonly privacyRepository: Repository<Privacy>,
+    // @InjectRepository(Profile)
+    // private readonly profileRepository: Repository<Profile>, // Reserved for future use
+    // @InjectRepository(Privacy)
+    // private readonly privacyRepository: Repository<Privacy>, // Reserved for future use
     @InjectRepository(Security)
     private readonly securityRepository: Repository<Security>,
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
     private readonly configService: ConfigService,
-    private readonly followsService: FollowsService,
+    // private readonly followsService: FollowsService, // Reserved for future use
   ) {}
 
   // #########################################################

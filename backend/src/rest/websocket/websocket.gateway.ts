@@ -4,14 +4,14 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
-  MessageBody,
+  // MessageBody, // Reserved for future use
   SubscribeMessage,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Server } from 'socket.io';
 import {
   Injectable,
   Logger,
-  UnauthorizedException,
+  // UnauthorizedException, // Reserved for future use
   OnModuleInit,
 } from '@nestjs/common';
 import { WebsocketService } from './websocket.service';
@@ -40,11 +40,11 @@ export class WebsocketGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
 {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(WebsocketGateway.name);
   private sessionStore: session.Store | null = null;
-  private readonly sessionSecret: string;
+  // private readonly sessionSecret!: string; // Reserved for future session management
   private readonly sessionCookieName: string = SESSION_COOKIE_NAME;
 
   constructor(
@@ -54,11 +54,12 @@ export class WebsocketGateway
     private readonly sessionStoreConfig: SessionStoreConfig,
     private readonly configService: ConfigService,
   ) {
+    // Validate SESSION_SECRET is set (reserved for future use)
     const sessionSecret = this.configService.get<string>('SESSION_SECRET');
     if (!sessionSecret) {
       throw new Error('SESSION_SECRET environment variable is required');
     }
-    this.sessionSecret = sessionSecret;
+    // this.sessionSecret = sessionSecret; // Reserved for future use
   }
 
   async onModuleInit() {
@@ -258,7 +259,7 @@ export class WebsocketGateway
 
       // Parse cookies manually
       const cookieString = Array.isArray(cookies) ? cookies[0] : cookies;
-      const cookiePairs = cookieString.split(';').map((c) => c.trim());
+      const cookiePairs = cookieString.split(';').map((c: string) => c.trim());
       let sessionId: string | null = null;
 
       for (const pair of cookiePairs) {

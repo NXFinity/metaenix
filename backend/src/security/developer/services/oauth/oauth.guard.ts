@@ -1,5 +1,5 @@
 import {
-  CanActivate,
+  // CanActivate, // Reserved for future use
   ExecutionContext,
   Injectable,
   UnauthorizedException,
@@ -112,7 +112,7 @@ export class OAuthGuard extends AuthGuard('oauth') {
     }
   }
 
-  handleRequest(err: any, user: any, info: any) {
+  handleRequest(err: any, user: any, _info: any) {
     if (err || !user) {
       throw err || new UnauthorizedException('Invalid OAuth token');
     }

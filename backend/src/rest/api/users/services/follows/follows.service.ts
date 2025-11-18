@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, MoreThanOrEqual, Between } from 'typeorm';
+import { Repository, In, MoreThanOrEqual } from 'typeorm';
 import { Follow } from './assets/entities/follow.entity';
 import { User } from '../../assets/entities/user.entity';
 import { LoggingService } from '@logging/logging';

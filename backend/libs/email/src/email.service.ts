@@ -37,6 +37,28 @@ export class EmailService {
   }
 
   /**
+   * Extract error message from unknown error type
+   */
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (error && typeof error === 'object' && 'response' in error) {
+      const response = (error as { response?: unknown }).response;
+      if (typeof response === 'string') {
+        return response;
+      }
+    }
+    if (error && typeof error === 'object' && 'message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string') {
+        return message;
+      }
+    }
+    return '';
+  }
+
+  /**
    * Send email verification email
    *
    * @param to - Recipient email address
@@ -69,7 +91,7 @@ export class EmailService {
       this.logger.error(`Failed to send verification email to ${to}:`, error);
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||
@@ -120,7 +142,7 @@ export class EmailService {
       this.logger.error(`Failed to send password reset email to ${to}:`, error);
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||
@@ -171,7 +193,7 @@ export class EmailService {
       this.logger.error(`Failed to send forgot password email to ${to}:`, error);
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||
@@ -221,7 +243,7 @@ export class EmailService {
       );
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||
@@ -268,7 +290,7 @@ export class EmailService {
       this.logger.error(`Failed to send welcome email to ${to}:`, error);
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||
@@ -321,7 +343,7 @@ export class EmailService {
       this.logger.error(`Failed to send 2FA email to ${to}:`, error);
 
       // Check for various types of invalid email address errors
-      const errorMessage = error.response || error.message || '';
+      const errorMessage = this.getErrorMessage(error);
       const isInvalidEmail =
         errorMessage.includes('User unknown in virtual mailbox table') ||
         errorMessage.includes('Recipient address rejected') ||

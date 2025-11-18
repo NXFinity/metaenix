@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsUrl } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, IsEnum, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class AuthorizeDto {
@@ -8,7 +8,9 @@ export class AuthorizeDto {
   })
   @IsString()
   @IsNotEmpty()
-  clientId: string;
+  @MinLength(10)
+  @MaxLength(255)
+  clientId!: string;
 
   @ApiProperty({
     description: 'Redirect URI where the authorization code will be sent',
@@ -16,7 +18,7 @@ export class AuthorizeDto {
   })
   @IsUrl({ require_protocol: true })
   @IsNotEmpty()
-  redirectUri: string;
+  redirectUri!: string;
 
   @ApiProperty({
     description: 'Space-separated list of scopes to request',
@@ -24,7 +26,8 @@ export class AuthorizeDto {
   })
   @IsString()
   @IsNotEmpty()
-  scope: string;
+  @MaxLength(1000)
+  scope!: string;
 
   @ApiProperty({
     description: 'Response type (must be "code" for Authorization Code flow)',
@@ -33,7 +36,7 @@ export class AuthorizeDto {
   })
   @IsString()
   @IsNotEmpty()
-  responseType: string;
+  responseType!: string;
 
   @ApiPropertyOptional({
     description: 'State parameter for CSRF protection',
@@ -41,6 +44,7 @@ export class AuthorizeDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   state?: string;
 
   @ApiPropertyOptional({
@@ -49,6 +53,7 @@ export class AuthorizeDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(500)
   codeChallenge?: string;
 
   @ApiPropertyOptional({
@@ -56,8 +61,8 @@ export class AuthorizeDto {
     example: 'S256',
     enum: ['S256', 'plain'],
   })
-  @IsString()
+  @IsEnum(['S256', 'plain'])
   @IsOptional()
-  codeChallengeMethod?: string;
+  codeChallengeMethod?: 'S256' | 'plain';
 }
 

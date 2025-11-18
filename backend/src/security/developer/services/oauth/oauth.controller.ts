@@ -86,7 +86,7 @@ export class OAuthController {
       scope: query.scope,
       state: query.state,
       codeChallenge: query.code_challenge,
-      codeChallengeMethod: query.code_challenge_method,
+      codeChallengeMethod: query.code_challenge_method as 'S256' | 'plain' | undefined,
     };
 
     return this.oauthService.authorize(authorizeDto, user.id);

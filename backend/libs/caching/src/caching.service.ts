@@ -10,7 +10,7 @@ export class CachingService {
 
   // Default TTLs (in seconds)
   private readonly DEFAULT_USER_TTL = 300; // 5 minutes
-  private readonly DEFAULT_PROFILE_TTL = 600; // 10 minutes
+  // private readonly DEFAULT_PROFILE_TTL = 600; // 10 minutes - Reserved for future use
   private readonly DEFAULT_GENERIC_TTL = 300; // 5 minutes
 
   constructor(

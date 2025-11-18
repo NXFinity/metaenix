@@ -11,7 +11,7 @@ import { Permission } from '../enum/permission.enum';
 import { ROLES_KEY } from '../decorator/role.decorator';
 import { CHECK_PERMISSION_KEY } from '../decorators/check-permission.decorator';
 import {
-  roleHasPermission,
+  // roleHasPermission, // Reserved for future use
   roleHasAnyPermission,
 } from '../config/role-permissions.config';
 import { AuthenticatedRequest } from '../../../../common/interfaces/authenticated-request.interface';

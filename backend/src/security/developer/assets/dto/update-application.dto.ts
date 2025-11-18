@@ -30,6 +30,7 @@ export class UpdateApplicationDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(2000)
   description?: string;
 
   @ApiProperty({

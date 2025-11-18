@@ -11,7 +11,7 @@ import {
   BadRequestException,
   UseInterceptors,
   UploadedFiles,
-  Req,
+  // Req, // Reserved for future use
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { PostsService } from './posts.service';
@@ -330,7 +330,7 @@ export class PostsController {
   getUserFeed(
     @Param('userId') targetUserId: string,
     @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: User,
+    @CurrentUser() _user?: User,
   ) {
     return this.postsService.getFeed(targetUserId, paginationDto);
   }

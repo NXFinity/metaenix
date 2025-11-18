@@ -5,12 +5,13 @@ export class ResetDto {
   @ApiProperty({ example: 'a1b2c3d4e5f6...' })
   @IsNotEmpty()
   @IsString()
-  token: string;
+  @MaxLength(500)
+  token!: string;
 
   @ApiProperty({ example: 'NewSecurePassword123!' })
   @IsNotEmpty()
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  newPassword: string;
+  newPassword!: string;
 }

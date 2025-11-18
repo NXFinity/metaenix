@@ -5,12 +5,12 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
-  MessageBody,
+  // MessageBody, // Reserved for future use
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Server } from 'socket.io';
 import { Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { FollowsService } from './follows.service';
+// import { ConfigService } from '@nestjs/config'; // Reserved for future use
+// import { FollowsService } from './follows.service'; // Reserved for future use
 import { AuthenticatedSocket } from 'src/common/interfaces/authenticated-socket.interface';
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
@@ -30,15 +30,15 @@ export class FollowsGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(FollowsGateway.name);
 
   constructor(
-    private readonly followsService: FollowsService,
+    // private readonly followsService: FollowsService, // Reserved for future use
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    private readonly configService: ConfigService,
+    // private readonly configService: ConfigService, // Reserved for future use
     private readonly loggingService: LoggingService,
   ) {}
 

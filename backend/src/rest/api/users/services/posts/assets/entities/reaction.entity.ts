@@ -16,32 +16,32 @@ export class Reaction extends BaseEntity {
     enum: ['like', 'love', 'laugh', 'wow', 'sad', 'angry'],
     nullable: false,
   })
-  reactionType: 'like' | 'love' | 'laugh' | 'wow' | 'sad' | 'angry';
+  reactionType!: 'like' | 'love' | 'laugh' | 'wow' | 'sad' | 'angry';
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   @ManyToOne(() => Post, {
     nullable: true,
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'postId' })
-  post: Post | null;
+  post!: Post | null;
 
   @Column({ nullable: true })
-  postId: string | null;
+  postId!: string | null;
 
   @ManyToOne(() => Comment, {
     nullable: true,
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'commentId' })
-  comment: Comment | null;
+  comment!: Comment | null;
 
   @Column({ nullable: true })
-  commentId: string | null;
+  commentId!: string | null;
 }

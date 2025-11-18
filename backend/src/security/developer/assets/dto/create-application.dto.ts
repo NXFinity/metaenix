@@ -21,7 +21,7 @@ export class CreateApplicationDto {
   @IsString()
   @MinLength(3)
   @MaxLength(255)
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'Application description',
@@ -38,7 +38,7 @@ export class CreateApplicationDto {
     example: ApplicationEnvironment.DEVELOPMENT,
   })
   @IsEnum(ApplicationEnvironment)
-  environment: ApplicationEnvironment;
+  environment!: ApplicationEnvironment;
 
   @ApiProperty({
     description: 'Redirect URIs for OAuth (max 10)',
@@ -67,7 +67,7 @@ export class CreateApplicationDto {
     required: true,
   })
   @IsUrl({ require_tld: false })
-  websiteUrl: string;
+  websiteUrl!: string;
 
   @ApiProperty({
     description: 'Privacy policy URL',
@@ -75,7 +75,7 @@ export class CreateApplicationDto {
     required: true,
   })
   @IsUrl({ require_tld: false })
-  privacyPolicyUrl: string;
+  privacyPolicyUrl!: string;
 
   @ApiProperty({
     description: 'Terms of service URL',
@@ -83,7 +83,7 @@ export class CreateApplicationDto {
     required: true,
   })
   @IsUrl({ require_tld: false })
-  termsOfServiceUrl: string;
+  termsOfServiceUrl!: string;
 
   @ApiProperty({
     description: 'Requested scopes',

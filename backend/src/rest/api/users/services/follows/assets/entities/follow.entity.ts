@@ -9,15 +9,15 @@ import { User } from '../../../../assets/entities/user.entity';
 export class Follow extends BaseEntity {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'followerId' })
-  follower: User;
+  follower!: User;
 
   @Column({ nullable: false })
-  followerId: string;
+  followerId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'followingId' })
-  following: User;
+  following!: User;
 
   @Column({ nullable: false })
-  followingId: string;
+  followingId!: string;
 }

@@ -1,5 +1,6 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { TokenTypeHint } from './introspect.dto';
 
 export class RevokeDto {
   @ApiProperty({
@@ -8,15 +9,16 @@ export class RevokeDto {
   })
   @IsString()
   @IsNotEmpty()
-  token: string;
+  @MaxLength(500)
+  token!: string;
 
   @ApiPropertyOptional({
     description: 'Token type hint (optional)',
     example: 'access_token',
-    enum: ['access_token', 'refresh_token'],
+    enum: TokenTypeHint,
   })
-  @IsString()
+  @IsEnum(TokenTypeHint)
   @IsOptional()
-  tokenTypeHint?: string;
+  tokenTypeHint?: TokenTypeHint;
 }
 

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
+import { IsInt, IsOptional, IsString, Min, Max, IsEnum, MaxLength } from 'class-validator';
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -43,6 +43,7 @@ export class PaginationDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   sortBy?: string = 'dateCreated';
 
   @ApiProperty({
@@ -53,7 +54,7 @@ export class PaginationDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsEnum(['ASC', 'DESC'])
   sortOrder?: 'ASC' | 'DESC' = 'DESC';
 }
 

@@ -9,46 +9,46 @@ import { LogCategory } from '../enums/log-category.enum';
 @Index(['level', 'dateCreated'])
 export class AuditLog extends BaseEntity {
   @Column({ type: 'enum', enum: LogLevel })
-  level: LogLevel;
+  level!: LogLevel;
 
   @Column({ type: 'enum', enum: LogCategory })
-  category: LogCategory;
+  category!: LogCategory;
 
   @Column({ type: 'varchar', length: 255 })
-  message: string;
+  message!: string;
 
   @Column({ type: 'text', nullable: true })
-  details: string | null;
+  details!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  userId: string | null;
+  userId!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  username: string | null;
+  username!: string | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
-  ipAddress: string | null;
+  ipAddress!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  userAgent: string | null;
+  userAgent!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  requestId: string | null;
+  requestId!: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  endpoint: string | null;
+  endpoint!: string | null;
 
   @Column({ type: 'varchar', length: 10, nullable: true })
-  method: string | null;
+  method!: string | null;
 
   @Column({ type: 'int', nullable: true })
-  statusCode: number | null;
+  statusCode!: number | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata: Record<string, any> | null;
+  metadata!: Record<string, any> | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  error: {
+  error!: {
     name?: string;
     message?: string;
     stack?: string;

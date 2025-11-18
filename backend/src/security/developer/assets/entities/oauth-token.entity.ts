@@ -10,53 +10,61 @@ import { TokenType } from '../enum/token-type.enum';
 @Index(['userId'])
 @Index(['revoked'])
 @Index(['expiresAt'])
+@Index(['accessTokenHash']) // Index for fast token lookup
+@Index(['refreshTokenHash']) // Index for fast refresh token lookup
 export class OAuthToken extends BaseEntity {
   @Column({ type: 'varchar', unique: true })
-  accessToken: string; // Hashed
+  accessToken!: string; // Hashed with bcrypt (for verification)
 
   @Column({ type: 'varchar', nullable: true, unique: true })
-  refreshToken: string | null; // Hashed, nullable
+  refreshToken!: string | null; // Hashed with bcrypt (for verification), nullable
+
+  @Column({ type: 'varchar', length: 64, nullable: true, unique: true })
+  accessTokenHash!: string | null; // SHA-256 hash for fast lookup (indexed)
+
+  @Column({ type: 'varchar', length: 64, nullable: true, unique: true })
+  refreshTokenHash!: string | null; // SHA-256 hash for fast lookup (indexed)
 
   @Column({
     type: 'enum',
     enum: TokenType,
     default: TokenType.BEARER,
   })
-  tokenType: TokenType;
+  tokenType!: TokenType;
 
   @Column('simple-array')
-  scopes: string[];
+  scopes!: string[];
 
   @Column({ type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ type: 'timestamp', nullable: true })
-  refreshExpiresAt: Date | null;
+  refreshExpiresAt!: Date | null;
 
   @ManyToOne(() => Application, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'applicationId' })
-  application: Application;
+  application!: Application;
 
   @Column()
-  applicationId: string;
+  applicationId!: string;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ type: 'varchar', nullable: true })
-  userId: string | null;
+  userId!: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  code: string | null; // Authorization code
+  code!: string | null; // Authorization code
 
   @Column({ type: 'timestamp', nullable: true })
-  codeExpiresAt: Date | null;
+  codeExpiresAt!: Date | null;
 
   @Column({ default: false })
-  revoked: boolean;
+  revoked!: boolean;
 
   @Column({ type: 'timestamp', nullable: true })
-  lastUsed: Date | null;
+  lastUsed!: Date | null;
 }
 

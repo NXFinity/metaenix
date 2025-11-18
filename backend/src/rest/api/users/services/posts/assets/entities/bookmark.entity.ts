@@ -11,18 +11,18 @@ import { User } from '../../../../assets/entities/user.entity';
 export class Bookmark extends BaseEntity {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   @ManyToOne(() => Post, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'postId' })
-  post: Post;
+  post!: Post;
 
   @Column({ nullable: false })
-  postId: string;
+  postId!: string;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
-  note: string | null; // Optional note about why bookmarked
+  note!: string | null; // Optional note about why bookmarked
 }

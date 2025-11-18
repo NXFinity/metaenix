@@ -19,17 +19,17 @@ export class RegisterDto {
     message: 'Username can only contain letters, numbers, underscores, and hyphens',
   })
   @SanitizeUsername()
-  username: string;
+  username!: string;
 
   @ApiProperty({ example: 'john.doe@example.com' })
   @IsNotEmpty()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'SecurePassword123!' })
   @IsNotEmpty()
   @IsString()
   @MinLength(8)
   @MaxLength(100)
-  password: string;
+  password!: string;
 }

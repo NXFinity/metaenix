@@ -1,10 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
-  HttpException,
-  HttpStatus,
+  // HttpException, // Reserved for future use
+  // HttpStatus, // Reserved for future use
   Injectable,
-  InternalServerErrorException,
+  // InternalServerErrorException, // Reserved for future use
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -12,9 +12,9 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { Application } from './assets/entities/application.entity';
-import { OAuthToken } from './assets/entities/oauth-token.entity';
+// import { OAuthToken } from './assets/entities/oauth-token.entity'; // Reserved for future use
 import { User } from '../../rest/api/users/assets/entities/user.entity';
-import { Security } from '../../rest/api/users/assets/entities/security/security.entity';
+// import { Security } from '../../rest/api/users/assets/entities/security/security.entity'; // Reserved for future use
 import {
   CreateApplicationDto,
   UpdateApplicationDto,
@@ -33,12 +33,12 @@ export class DeveloperService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(Security)
-    private readonly securityRepository: Repository<Security>,
+    // @InjectRepository(Security)
+    // private readonly securityRepository: Repository<Security>, // Reserved for future use
     @InjectRepository(Application)
     private readonly applicationRepository: Repository<Application>,
-    @InjectRepository(OAuthToken)
-    private readonly oauthTokenRepository: Repository<OAuthToken>,
+    // @InjectRepository(OAuthToken)
+    // private readonly oauthTokenRepository: Repository<OAuthToken>, // Reserved for future use
     private readonly loggingService: LoggingService,
     private readonly scopeService: ScopeService,
   ) {}

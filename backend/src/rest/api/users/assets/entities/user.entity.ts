@@ -20,64 +20,64 @@ export class User extends BaseEntity {
   // #########################################################
   // WebSocketID - Created as part of user registration
   @Column()
-  websocketId: string;
+  websocketId!: string;
   // #########################################################
 
   // Basic User information
   @Column({ unique: true, length: 50, nullable: false })
-  username: string;
+  username!: string;
   @Column({ unique: true, length: 50, nullable: false })
-  displayName: string;
+  displayName!: string;
   @Column({ unique: true, length: 255, nullable: false })
-  email: string;
+  email!: string;
   @Column()
-  password: string;
+  password!: string;
   @Column({ type: 'enum', enum: ROLE, default: ROLE.Member })
-  role: ROLE;
+  role!: ROLE;
 
   // User Entities
   @OneToOne(() => Profile, (profile) => profile.user, { onDelete: 'CASCADE' })
-  profile: Profile;
+  profile!: Profile;
   // #########################################################
   // Connected to Privacy Entity
   @Column({ type: 'boolean', default: true })
   isPublic?: boolean;
   @OneToOne(() => Privacy, (privacy) => privacy.user, { onDelete: 'CASCADE' })
-  privacy: Privacy;
+  privacy!: Privacy;
   // #########################################################
   // Account Security
   @OneToOne(() => Security, (security) => security.user, {
     onDelete: 'CASCADE',
   })
-  security: Security;
+  security!: Security;
   // #########################################################
 
   // User relationships
   @OneToMany(() => Post, (post) => post.user, { onDelete: 'CASCADE' })
-  posts: Post[];
+  posts!: Post[];
 
   @OneToMany(() => Comment, (comment) => comment.user, { onDelete: 'CASCADE' })
-  comments: Comment[];
+  comments!: Comment[];
 
   @OneToMany(() => Like, (like) => like.user, { onDelete: 'CASCADE' })
-  likes: Like[];
+  likes!: Like[];
 
   @OneToMany(() => Share, (share) => share.user, { onDelete: 'CASCADE' })
-  shares: Share[];
+  shares!: Share[];
 
   // Follow relationships
   @Column({ type: 'int', default: 0 })
-  followersCount: number;
+  followersCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  followingCount: number;
+  followingCount!: number;
 
   // #########################################################
   // Developer fields
   @Column({ type: 'boolean', default: false })
-  isDeveloper: boolean;
+  isDeveloper!: boolean;
 
   @Column({ nullable: true })
-  developerTermsAcceptedAt: Date;
+  developerTermsAcceptedAt!: Date;
   // #########################################################
 }

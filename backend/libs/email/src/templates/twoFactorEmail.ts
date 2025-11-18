@@ -1,7 +1,7 @@
 export function getTwoFactorEmailTemplate(
   username: string,
   backupCodes: string[],
-  frontendUrl?: string,
+  _frontendUrl?: string,
 ): string {
   return `
     <!DOCTYPE html>

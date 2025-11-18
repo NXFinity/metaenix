@@ -23,7 +23,7 @@ export class PerformanceInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: (data) => {
+        next: () => {
           const duration = Date.now() - startTime;
           const response = context.switchToHttp().getResponse();
           const userId = (request as any).user?.id || (request as any).session?.user?.id;

@@ -6,42 +6,42 @@ import { DEFAULT_PROFILE_IMAGES } from 'src/common/constants/app.constants';
 @Entity('userProfile', { schema: 'account' })
 export class Profile extends BaseEntity {
   @Column({ length: 50, nullable: true })
-  firstName: string;
+  firstName!: string;
   @Column({ length: 50, nullable: true })
-  lastName: string;
+  lastName!: string;
   @Column({ length: 500, nullable: true })
-  bio: string;
+  bio!: string;
   @Column({ length: 50, nullable: true })
-  location: string;
+  location!: string;
   @Column({ length: 50, nullable: true })
-  website: string;
+  website!: string;
   @Column({ type: 'date', nullable: true })
-  dateOfBirth: Date;
+  dateOfBirth!: Date;
 
   @Column({
     type: 'varchar',
     default: DEFAULT_PROFILE_IMAGES.AVATAR,
   })
-  avatar: string;
+  avatar!: string;
   @Column({
     type: 'varchar',
     default: DEFAULT_PROFILE_IMAGES.COVER,
   })
-  cover: string;
+  cover!: string;
   @Column({
     type: 'varchar',
     default: DEFAULT_PROFILE_IMAGES.BANNER,
   })
-  banner: string;
+  banner!: string;
   @Column({
     type: 'varchar',
     default: DEFAULT_PROFILE_IMAGES.OFFLINE,
   })
-  offline: string;
+  offline!: string;
   @Column({ type: 'varchar', nullable: true })
-  chat: string;
+  chat!: string;
 
   @OneToOne(() => User, (user) => user.profile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'profileId' })
-  user: User;
+  user!: User;
 }

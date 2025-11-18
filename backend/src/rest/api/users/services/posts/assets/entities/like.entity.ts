@@ -17,35 +17,35 @@ export class Like extends BaseEntity {
   // Like Type
   // #########################################################
   @Column({ type: 'enum', enum: ['post', 'comment'], nullable: false })
-  likeType: 'post' | 'comment';
+  likeType!: 'post' | 'comment';
 
   // #########################################################
   // Relationships
   // #########################################################
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   @ManyToOne(() => Post, (post) => post.likes, {
     nullable: true,
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'postId' })
-  post: Post | null;
+  post!: Post | null;
 
   @Column({ nullable: true })
-  postId: string | null;
+  postId!: string | null;
 
   @ManyToOne(() => Comment, (comment) => comment.likes, {
     nullable: true,
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'commentId' })
-  comment: Comment | null;
+  comment!: Comment | null;
 
   @Column({ nullable: true })
-  commentId: string | null;
+  commentId!: string | null;
 }

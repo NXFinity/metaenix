@@ -33,83 +33,83 @@ export class Post extends BaseEntity {
   // Post Content
   // #########################################################
   @Column({ type: 'text', nullable: false })
-  content: string;
+  content!: string;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  mediaUrl: string | null;
+  mediaUrl!: string | null;
 
   @Column({ type: 'simple-array', nullable: true })
-  mediaUrls: string[];
+  mediaUrls!: string[];
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  linkUrl: string | null;
+  linkUrl!: string | null;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
-  linkTitle: string | null;
+  linkTitle!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  linkDescription: string | null;
+  linkDescription!: string | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  linkImage: string | null;
+  linkImage!: string | null;
 
   // #########################################################
   // Post Settings
   // #########################################################
   @Column({ type: 'boolean', default: true })
-  isPublic: boolean;
+  isPublic!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  allowComments: boolean;
+  allowComments!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isPinned: boolean;
+  isPinned!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isEdited: boolean;
+  isEdited!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isDraft: boolean;
+  isDraft!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isArchived: boolean;
+  isArchived!: boolean;
 
   @Column({ type: 'timestamp', nullable: true })
-  scheduledDate: Date | null;
+  scheduledDate!: Date | null;
 
   @Column({ type: 'simple-array', nullable: true, default: [] })
-  hashtags: string[];
+  hashtags!: string[];
 
   @Column({ type: 'simple-array', nullable: true, default: [] })
-  mentions: string[];
+  mentions!: string[];
 
   @Column({ type: 'varchar', length: 50, nullable: true })
-  postType: 'text' | 'image' | 'video' | 'document' | 'mixed' | null;
+  postType!: 'text' | 'image' | 'video' | 'document' | 'mixed' | null;
 
   // #########################################################
   // Post Statistics
   // #########################################################
   @Column({ type: 'int', default: 0 })
-  likesCount: number;
+  likesCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  commentsCount: number;
+  commentsCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  sharesCount: number;
+  sharesCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  viewsCount: number;
+  viewsCount!: number;
 
   // #########################################################
   // Relationships
   // #########################################################
   @ManyToOne(() => User, (user) => user.posts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user!: User;
 
   @Column({ nullable: false })
-  userId: string;
+  userId!: string;
 
   // Post can be a reply to another post
   @ManyToOne(() => Post, (post) => post.replies, {
@@ -117,45 +117,45 @@ export class Post extends BaseEntity {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'parentPostId' })
-  parentPost: Post | null;
+  parentPost!: Post | null;
 
   @Column({ nullable: true })
-  parentPostId: string | null;
+  parentPostId!: string | null;
 
   @OneToMany(() => Post, (post) => post.parentPost, { cascade: true })
-  replies: Post[];
+  replies!: Post[];
 
   // Comments on this post
   @OneToMany(() => Comment, (comment) => comment.post, { cascade: true })
-  comments: Comment[];
+  comments!: Comment[];
 
   // Likes on this post
   @OneToMany(() => Like, (like) => like.post, { cascade: true })
-  likes: Like[];
+  likes!: Like[];
 
   // Shares of this post
   @OneToMany(() => Share, (share) => share.post, { cascade: true })
-  shares: Share[];
+  shares!: Share[];
 
   // Bookmarks of this post
   @OneToMany(() => Bookmark, (bookmark) => bookmark.post, { cascade: true })
-  bookmarks: Bookmark[];
+  bookmarks!: Bookmark[];
 
   // Reports on this post
   @OneToMany(() => Report, (report) => report.post, { cascade: true })
-  reports: Report[];
+  reports!: Report[];
 
   // Reactions on this post
   @OneToMany(() => Reaction, (reaction) => reaction.post, { cascade: true })
-  reactions: Reaction[];
+  reactions!: Reaction[];
 
   // Collections this post belongs to
   @ManyToMany(() => Collection, (collection) => collection.posts)
-  collections: Collection[];
+  collections!: Collection[];
 
   @Column({ type: 'int', default: 0 })
-  bookmarksCount: number;
+  bookmarksCount!: number;
 
   @Column({ type: 'int', default: 0 })
-  reportsCount: number;
+  reportsCount!: number;
 }

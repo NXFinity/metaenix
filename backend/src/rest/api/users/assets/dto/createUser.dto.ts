@@ -1,4 +1,4 @@
-import { PartialType } from '@nestjs/swagger';
+// import { PartialType } from '@nestjs/swagger'; // Reserved for future use
 import { CreateProfileDto, UpdateProfileDto } from './createProfile.dto';
 import { CreatePrivacyDto, UpdatePrivacyDto } from './createPrivacy.dto';
 import { ROLE } from 'src/security/roles/assets/enum/role.enum';
@@ -16,16 +16,16 @@ import {
 } from '../../../../../utils/sanitize-dto.util';
 
 export class CreateUserDto {
-  username: string;
-  email: string;
-  password: string;
+  username!: string;
+  email!: string;
+  password!: string;
 
   displayName?: string;
 
   role?: ROLE;
 
-  profile: CreateProfileDto;
-  privacy: CreatePrivacyDto;
+  profile!: CreateProfileDto;
+  privacy!: CreatePrivacyDto;
 }
 
 export class UpdateUserDto {
