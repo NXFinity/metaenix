@@ -20,7 +20,7 @@ interface SeedUser {
   email: string;
   password: string;
   displayName: string;
-  role: ROLE;
+  role?: ROLE; // Optional - if not provided, preserve existing role
 }
 
 @Injectable()
@@ -282,7 +282,10 @@ export class SeedService implements OnModuleInit {
         existingUser.email = seedUser.email;
         existingUser.password = hashedPassword;
         existingUser.displayName = seedUser.displayName || seedUser.username;
-        existingUser.role = seedUser.role || ROLE.Member;
+        // Only update role if explicitly provided in seed data, otherwise preserve existing role
+        if (seedUser.role !== undefined && seedUser.role !== null) {
+          existingUser.role = seedUser.role;
+        }
 
         // Ensure websocketId exists
         if (!existingUser.websocketId) {

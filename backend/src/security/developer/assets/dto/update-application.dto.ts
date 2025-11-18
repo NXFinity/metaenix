@@ -39,7 +39,7 @@ export class UpdateApplicationDto {
     required: false,
   })
   @IsArray()
-  @IsUrl({}, { each: true })
+  @IsUrl({ require_tld: false }, { each: true })
   @ArrayMaxSize(10)
   @IsOptional()
   redirectUris?: string[];
@@ -49,7 +49,7 @@ export class UpdateApplicationDto {
     example: 'https://yourapp.com/icon.png',
     required: false,
   })
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   @IsOptional()
   iconUrl?: string;
 
@@ -58,7 +58,7 @@ export class UpdateApplicationDto {
     example: 'https://yourapp.com',
     required: false,
   })
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   @IsOptional()
   websiteUrl?: string;
 
@@ -67,7 +67,7 @@ export class UpdateApplicationDto {
     example: 'https://yourapp.com/privacy',
     required: false,
   })
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   @IsOptional()
   privacyPolicyUrl?: string;
 
@@ -76,7 +76,7 @@ export class UpdateApplicationDto {
     example: 'https://yourapp.com/terms',
     required: false,
   })
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   @IsOptional()
   termsOfServiceUrl?: string;
 

@@ -1,9 +1,8 @@
 'use client';
 
-import { MainLayout } from '@/theme/layout/MainLayout';
 import { useAuth } from '@/core/hooks/useAuth';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import { Input } from '@/theme/ui/input';
@@ -12,6 +11,11 @@ import { Textarea } from '@/theme/ui/textarea';
 import { Checkbox } from '@/theme/ui/checkbox';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { developerService } from '@/core/api/developer';
+import { storageService } from '@/core/api/storage';
+import { StorageType } from '@/core/api/storage/types/storage.type';
+import { oauthService } from '@/core/api/oauth';
+import type { ScopeDefinition } from '@/core/api/oauth/types/oauth.type';
+import { GrantType } from '@/core/api/oauth/types/oauth.type';
 import type {
   DeveloperStatus,
   Application,
@@ -19,7 +23,7 @@ import type {
   UpdateApplicationRequest,
 } from '@/core/api/developer/types/developer.type';
 import { ApplicationEnvironment } from '@/core/api/developer/types/developer.type';
-import { ArrowLeftIcon, PlusIcon, TrashIcon, CopyIcon, EyeIcon, EyeOffIcon, RefreshCwIcon } from 'lucide-react';
+import { ArrowLeftIcon, PlusIcon, TrashIcon, CopyIcon, EyeIcon, EyeOffIcon, RefreshCwIcon, XIcon, UploadIcon } from 'lucide-react';
 import Link from 'next/link';
 import {
   Dialog,
@@ -44,6 +48,13 @@ export default function DeveloperPage() {
   const [storedSecret, setStoredSecret] = useState<string | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [showOAuthTest, setShowOAuthTest] = useState<string | null>(null);
+  const [oauthScopes, setOauthScopes] = useState<ScopeDefinition[]>([]);
+  const [authorizationCode, setAuthorizationCode] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [testRedirectUri, setTestRedirectUri] = useState<string>('');
+  const [testScopes, setTestScopes] = useState<string>('read:profile');
+  const [testClientSecret, setTestClientSecret] = useState<string>('');
 
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
@@ -70,6 +81,19 @@ export default function DeveloperPage() {
     queryKey: ['developer', 'applications'],
     queryFn: () => developerService.getApplications(),
     enabled: isAuthenticated && user?.isDeveloper === true,
+  });
+
+  // Get OAuth scopes
+  const {
+    data: scopesData,
+    isLoading: isLoadingScopes,
+  } = useQuery({
+    queryKey: ['oauth', 'scopes'],
+    queryFn: () => oauthService.getScopes(),
+    enabled: isAuthenticated && user?.isDeveloper === true,
+    onSuccess: (data) => {
+      setOauthScopes(data.scopes);
+    },
   });
 
   // Register as developer mutation
@@ -165,14 +189,100 @@ export default function DeveloperPage() {
     });
   };
 
+  // OAuth Testing Functions
+  const handleTestAuthorization = async (app: Application) => {
+    if (!testRedirectUri.trim()) {
+      showNotification('error', 'Please enter a redirect URI');
+      return;
+    }
+
+    try {
+      const response = await oauthService.authorize({
+        clientId: app.clientId,
+        redirectUri: testRedirectUri,
+        responseType: 'code',
+        scope: testScopes || 'read:profile',
+        state: Math.random().toString(36).substring(7),
+      });
+      setAuthorizationCode(response.code);
+      showNotification('success', 'Authorization code generated successfully');
+    } catch (error: any) {
+      showNotification('error', error?.response?.data?.message || 'Failed to generate authorization code');
+    }
+  };
+
+  const handleExchangeToken = async (app: Application) => {
+    if (!authorizationCode) {
+      showNotification('error', 'Please generate an authorization code first');
+      return;
+    }
+
+    if (!testClientSecret.trim()) {
+      showNotification('error', 'Please enter your client secret');
+      return;
+    }
+
+    try {
+      const response = await oauthService.token({
+        grantType: GrantType.AUTHORIZATION_CODE,
+        clientId: app.clientId,
+        clientSecret: testClientSecret,
+        code: authorizationCode,
+        redirectUri: testRedirectUri,
+      });
+      setAccessToken(response.accessToken);
+      showNotification('success', 'Access token generated successfully');
+    } catch (error: any) {
+      showNotification('error', error?.response?.data?.message || 'Failed to exchange token');
+    }
+  };
+
+  const handleTestIntrospect = async (token: string) => {
+    try {
+      const response = await oauthService.introspect({
+        token,
+        tokenTypeHint: 'access_token',
+      });
+      showNotification('success', `Token is ${response.active ? 'active' : 'inactive'}`);
+    } catch (error: any) {
+      showNotification('error', error?.response?.data?.message || 'Failed to introspect token');
+    }
+  };
+
+  const handleTestRevoke = async (token: string) => {
+    try {
+      await oauthService.revoke({
+        token,
+        tokenTypeHint: 'access_token',
+      });
+      setAccessToken(null);
+      showNotification('success', 'Token revoked successfully');
+    } catch (error: any) {
+      showNotification('error', error?.response?.data?.message || 'Failed to revoke token');
+    }
+  };
+
+  // Handle redirects in useEffect to avoid setState during render
+  // MUST be called before any conditional returns to follow Rules of Hooks
+  useEffect(() => {
+    if (!isInitializing && !isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+
+    // If authenticated but wrong user, redirect to their own developer page
+    if (!isInitializing && isAuthenticated && user && user.username !== username) {
+      router.push(`/${user.username}/developer`);
+      return;
+    }
+  }, [isInitializing, isAuthenticated, user, username, router]);
+
   // Show loading while initializing auth
   if (isInitializing || isLoadingStatus) {
     return (
-      <MainLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <div className="animate-pulse text-muted-foreground">Loading...</div>
-        </div>
-      </MainLayout>
+      <div className="flex flex-1 items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
     );
   }
 
@@ -182,24 +292,27 @@ export default function DeveloperPage() {
     return null;
   }
 
-  // If authenticated but wrong user, redirect to their own developer page
+  // If authenticated but wrong user, redirect
   if (!isInitializing && isAuthenticated && user && user.username !== username) {
     router.push(`/${user.username}/developer`);
     return null;
   }
 
+  // Require Administrator role
+  if (!isInitializing && isAuthenticated && user && user.role !== 'Administrator') {
+    router.push(`/${username}/dashboard`);
+    return null;
+  }
+
   if (isInitializing || !user || user.username !== username) {
     return (
-      <MainLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <div className="animate-pulse text-muted-foreground">Loading...</div>
-        </div>
-      </MainLayout>
+      <div className="flex flex-1 items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
     );
   }
 
   return (
-    <MainLayout>
       <div className="flex flex-1 flex-col max-w-6xl mx-auto w-full p-4 md:p-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-4">
@@ -289,112 +402,271 @@ export default function DeveloperPage() {
             {isLoadingApps ? (
               <div className="text-center py-8 text-muted-foreground">Loading applications...</div>
             ) : applications && applications.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-4">
                 {applications.map((app) => (
-                  <Card key={app.id}>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg">{app.name}</CardTitle>
-                          <CardDescription className="mt-1">
-                            {app.environment === ApplicationEnvironment.PRODUCTION
-                              ? 'Production'
-                              : 'Development'}
-                          </CardDescription>
+                  <div key={app.id} className="space-y-4">
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-lg">{app.name}</CardTitle>
+                            <CardDescription className="mt-1">
+                              {app.environment === ApplicationEnvironment.PRODUCTION
+                                ? 'Production'
+                                : 'Development'}
+                            </CardDescription>
+                          </div>
+                          <span
+                            className={`px-2 py-1 text-xs rounded ${
+                              app.status === 'ACTIVE'
+                                ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+                                : app.status === 'PENDING'
+                                ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
+                                : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                            }`}
+                          >
+                            {app.status}
+                          </span>
                         </div>
-                        <span
-                          className={`px-2 py-1 text-xs rounded ${
-                            app.status === 'ACTIVE'
-                              ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                              : app.status === 'PENDING'
-                              ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
-                              : 'bg-red-500/10 text-red-600 dark:text-red-400'
-                          }`}
-                        >
-                          {app.status}
-                        </span>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {app.description && (
-                        <p className="text-sm text-muted-foreground">{app.description}</p>
-                      )}
-                      <div className="space-y-2">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Client ID</Label>
-                          <div className="flex items-center gap-2 mt-1">
-                            <code className="flex-1 text-xs bg-muted px-2 py-1 rounded">
-                              {app.clientId}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                navigator.clipboard.writeText(app.clientId);
-                                showNotification('success', 'Client ID copied');
-                              }}
-                            >
-                              <CopyIcon className="h-4 w-4" />
-                            </Button>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {app.description && (
+                          <p className="text-sm text-muted-foreground">{app.description}</p>
+                        )}
+                        <div className="space-y-2">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Client ID</Label>
+                            <div className="flex items-center gap-2 mt-1">
+                              <code className="flex-1 text-xs bg-muted px-2 py-1 rounded">
+                                {app.clientId}
+                              </code>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(app.clientId);
+                                  showNotification('success', 'Client ID copied');
+                                }}
+                              >
+                                <CopyIcon className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Client Secret</Label>
+                            <div className="flex items-center gap-2 mt-1">
+                              <code className="flex-1 text-xs bg-muted px-2 py-1 rounded">
+                                {revealedSecrets.has(app.id) ? '••••••••••••••••' : '••••••••••••••••'}
+                              </code>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  revealedSecrets.has(app.id)
+                                    ? handleHideSecret(app.id)
+                                    : handleRevealSecret(app.id)
+                                }
+                              >
+                                {revealedSecrets.has(app.id) ? (
+                                  <EyeOffIcon className="h-4 w-4" />
+                                ) : (
+                                  <EyeIcon className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Client Secret</Label>
-                          <div className="flex items-center gap-2 mt-1">
-                            <code className="flex-1 text-xs bg-muted px-2 py-1 rounded">
-                              {revealedSecrets.has(app.id) ? '••••••••••••••••' : '••••••••••••••••'}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                revealedSecrets.has(app.id)
-                                  ? handleHideSecret(app.id)
-                                  : handleRevealSecret(app.id)
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedApp(app);
+                              setShowEditDialog(true);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => regenerateSecretMutation.mutate(app.id)}
+                            disabled={regenerateSecretMutation.isPending}
+                          >
+                            <RefreshCwIcon className="h-4 w-4 mr-2" />
+                            Regenerate Secret
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setShowOAuthTest(showOAuthTest === app.id ? null : app.id);
+                              if (showOAuthTest !== app.id) {
+                                setTestRedirectUri(app.redirectUris?.[0] || '');
+                                setTestScopes(app.scopes?.join(' ') || 'read:profile');
+                                setAuthorizationCode(null);
+                                setAccessToken(null);
+                                setTestClientSecret('');
                               }
+                            }}
+                          >
+                            {showOAuthTest === app.id ? 'Hide' : 'Test'} OAuth
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedApp(app);
+                              setShowDeleteDialog(true);
+                            }}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* OAuth Testing Section */}
+                    {showOAuthTest === app.id && (
+                      <Card className="border-2 border-primary/20">
+                      <CardHeader>
+                        <CardTitle className="text-lg">OAuth Testing</CardTitle>
+                        <CardDescription>
+                          Test your OAuth application flow
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Available Scopes */}
+                        {oauthScopes.length > 0 && (
+                          <div>
+                            <Label className="text-sm font-medium mb-2 block">Available Scopes</Label>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-2 bg-muted rounded">
+                              {oauthScopes.map((scope) => (
+                                <div key={scope.id} className="text-xs">
+                                  <div className="font-medium">{scope.id}</div>
+                                  <div className="text-muted-foreground">{scope.description}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Test Redirect URI */}
+                        <div>
+                          <Label htmlFor={`redirect-uri-${app.id}`} className="text-sm font-medium">
+                            Redirect URI
+                          </Label>
+                          <Input
+                            id={`redirect-uri-${app.id}`}
+                            value={testRedirectUri}
+                            onChange={(e) => setTestRedirectUri(e.target.value)}
+                            placeholder="https://example.com/callback"
+                            className="mt-1"
+                          />
+                        </div>
+
+                        {/* Test Scopes */}
+                        <div>
+                          <Label htmlFor={`scopes-${app.id}`} className="text-sm font-medium">
+                            Scopes (space-separated)
+                          </Label>
+                          <Input
+                            id={`scopes-${app.id}`}
+                            value={testScopes}
+                            onChange={(e) => setTestScopes(e.target.value)}
+                            placeholder="read:profile write:posts"
+                            className="mt-1"
+                          />
+                        </div>
+
+                        {/* Client Secret Input */}
+                        {authorizationCode && (
+                          <div>
+                            <Label htmlFor={`client-secret-${app.id}`} className="text-sm font-medium">
+                              Client Secret (required for token exchange)
+                            </Label>
+                            <Input
+                              id={`client-secret-${app.id}`}
+                              type="password"
+                              value={testClientSecret}
+                              onChange={(e) => setTestClientSecret(e.target.value)}
+                              placeholder="Enter your client secret"
+                              className="mt-1"
+                            />
+                          </div>
+                        )}
+
+                        {/* Authorization Flow */}
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleTestAuthorization(app)}
+                              disabled={!testRedirectUri.trim()}
                             >
-                              {revealedSecrets.has(app.id) ? (
-                                <EyeOffIcon className="h-4 w-4" />
-                              ) : (
-                                <EyeIcon className="h-4 w-4" />
-                              )}
+                              Step 1: Get Authorization Code
                             </Button>
+                            {authorizationCode && (
+                              <code className="flex-1 text-xs bg-muted px-2 py-1 rounded break-all">
+                                {authorizationCode}
+                              </code>
+                            )}
+                          </div>
+
+                          {authorizationCode && (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleExchangeToken(app)}
+                                disabled={!testClientSecret.trim()}
+                              >
+                                Step 2: Exchange for Token
+                              </Button>
+                              {accessToken && (
+                                <code className="flex-1 text-xs bg-muted px-2 py-1 rounded break-all">
+                                  {accessToken.substring(0, 50)}...
+                                </code>
+                              )}
+                            </div>
+                          )}
+
+                          {accessToken && (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleTestIntrospect(accessToken)}
+                              >
+                                Introspect Token
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleTestRevoke(accessToken)}
+                              >
+                                Revoke Token
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* OAuth Endpoints Info */}
+                        <div className="pt-4 border-t">
+                          <Label className="text-sm font-medium mb-2 block">OAuth Endpoints</Label>
+                          <div className="space-y-1 text-xs font-mono bg-muted p-2 rounded">
+                            <div>GET /oauth/authorize</div>
+                            <div>POST /oauth/token</div>
+                            <div>POST /oauth/revoke</div>
+                            <div>POST /oauth/introspect</div>
+                            <div>GET /oauth/scopes</div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedApp(app);
-                            setShowEditDialog(true);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => regenerateSecretMutation.mutate(app.id)}
-                          disabled={regenerateSecretMutation.isPending}
-                        >
-                          <RefreshCwIcon className="h-4 w-4 mr-2" />
-                          Regenerate Secret
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedApp(app);
-                            setShowDeleteDialog(true);
-                          }}
-                        >
-                          <TrashIcon className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+                    )}
+                  </div>
                 ))}
               </div>
             ) : (
@@ -456,7 +728,6 @@ export default function DeveloperPage() {
           />
         )}
       </div>
-    </MainLayout>
   );
 }
 
@@ -476,26 +747,130 @@ function CreateApplicationDialog({
     name: '',
     description: '',
     environment: ApplicationEnvironment.DEVELOPMENT,
-    redirectUris: '',
+    redirectUris: [''],
+    iconFile: null as File | null,
     iconUrl: '',
     websiteUrl: '',
     privacyPolicyUrl: '',
     termsOfServiceUrl: '',
   });
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const iconInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Reset form when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setFormData({
+        name: '',
+        description: '',
+        environment: ApplicationEnvironment.DEVELOPMENT,
+        redirectUris: [''],
+        iconFile: null,
+        iconUrl: '',
+        websiteUrl: '',
+        privacyPolicyUrl: '',
+        termsOfServiceUrl: '',
+      });
+      setUploadingIcon(false);
+      if (iconInputRef.current) {
+        iconInputRef.current.value = '';
+      }
+    }
+  }, [open]);
+
+  const handleAddRedirectUri = () => {
+    setFormData({
+      ...formData,
+      redirectUris: [...formData.redirectUris, ''],
+    });
+  };
+
+  const handleRemoveRedirectUri = (index: number) => {
+    if (formData.redirectUris.length > 1) {
+      setFormData({
+        ...formData,
+        redirectUris: formData.redirectUris.filter((_, i) => i !== index),
+      });
+    }
+  };
+
+  const handleRedirectUriChange = (index: number, value: string) => {
+    const newRedirectUris = [...formData.redirectUris];
+    newRedirectUris[index] = value;
+    setFormData({
+      ...formData,
+      redirectUris: newRedirectUris,
+    });
+  };
+
+  const handleIconFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    setFormData({ ...formData, iconFile: file });
+    setUploadingIcon(true);
+
+    try {
+      const response = await storageService.upload({
+        file,
+        storageType: StorageType.MEDIA,
+        subType: 'photo',
+      });
+      setFormData({ ...formData, iconFile: file, iconUrl: response.url });
+    } catch (error: any) {
+      alert(error?.response?.data?.message || 'Failed to upload icon');
+      setFormData({ ...formData, iconFile: null });
+    } finally {
+      setUploadingIcon(false);
+    }
+  };
+
+  const handleRemoveIcon = () => {
+    setFormData({ ...formData, iconFile: null, iconUrl: '' });
+    if (iconInputRef.current) {
+      iconInputRef.current.value = '';
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Upload icon if file is selected but URL is not set
+    let iconUrl = formData.iconUrl;
+    if (formData.iconFile && !iconUrl) {
+      setUploadingIcon(true);
+      try {
+        const response = await storageService.upload({
+          file: formData.iconFile,
+          storageType: StorageType.MEDIA,
+          subType: 'photo',
+        });
+        iconUrl = response.url;
+      } catch (error: any) {
+        alert(error?.response?.data?.message || 'Failed to upload icon');
+        return;
+      } finally {
+        setUploadingIcon(false);
+      }
+    }
+
     onSubmit({
       name: formData.name,
       description: formData.description || undefined,
       environment: formData.environment,
-      redirectUris: formData.redirectUris
-        ? formData.redirectUris.split('\n').filter((uri) => uri.trim())
+      redirectUris: formData.redirectUris.filter((uri) => uri.trim()).length > 0
+        ? formData.redirectUris.filter((uri) => uri.trim())
         : undefined,
-      iconUrl: formData.iconUrl || undefined,
-      websiteUrl: formData.websiteUrl || undefined,
-      privacyPolicyUrl: formData.privacyPolicyUrl || undefined,
-      termsOfServiceUrl: formData.termsOfServiceUrl || undefined,
+      iconUrl: iconUrl || undefined,
+      websiteUrl: formData.websiteUrl.trim(),
+      privacyPolicyUrl: formData.privacyPolicyUrl.trim(),
+      termsOfServiceUrl: formData.termsOfServiceUrl.trim(),
     });
   };
 
@@ -546,52 +921,117 @@ function CreateApplicationDialog({
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="redirectUris">Redirect URIs (one per line)</Label>
-            <Textarea
-              id="redirectUris"
-              value={formData.redirectUris}
-              onChange={(e) => setFormData({ ...formData, redirectUris: e.target.value })}
-              placeholder="https://example.com/callback"
-              rows={3}
-            />
+            <Label>Redirect URIs *</Label>
+            <div className="space-y-2">
+              {formData.redirectUris.map((uri, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    type="url"
+                    value={uri}
+                    onChange={(e) => handleRedirectUriChange(index, e.target.value)}
+                    placeholder="https://example.com/callback"
+                    required
+                    className="flex-1"
+                  />
+                  {formData.redirectUris.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveRedirectUri(index)}
+                    >
+                      <XIcon className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddRedirectUri}
+                className="w-full"
+              >
+                <PlusIcon className="h-4 w-4 mr-2" />
+                Add Redirect URI
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="websiteUrl">Website URL</Label>
+              <Label htmlFor="websiteUrl">Website URL *</Label>
               <Input
                 id="websiteUrl"
                 type="url"
                 value={formData.websiteUrl}
                 onChange={(e) => setFormData({ ...formData, websiteUrl: e.target.value })}
+                required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="iconUrl">Icon URL</Label>
-              <Input
-                id="iconUrl"
-                type="url"
-                value={formData.iconUrl}
-                onChange={(e) => setFormData({ ...formData, iconUrl: e.target.value })}
-              />
+              <Label htmlFor="icon">Icon *</Label>
+              <div className="space-y-2">
+                <input
+                  ref={iconInputRef}
+                  id="icon"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleIconFileChange}
+                  className="hidden"
+                />
+                {formData.iconUrl ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={formData.iconUrl}
+                        alt="Icon preview"
+                        className="w-16 h-16 object-cover rounded border"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRemoveIcon}
+                      >
+                        <XIcon className="h-4 w-4 mr-2" />
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => iconInputRef.current?.click()}
+                    disabled={uploadingIcon}
+                    className="w-full"
+                  >
+                    <UploadIcon className="h-4 w-4 mr-2" />
+                    {uploadingIcon ? 'Uploading...' : 'Upload Icon'}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="privacyPolicyUrl">Privacy Policy URL</Label>
+              <Label htmlFor="privacyPolicyUrl">Privacy Policy URL *</Label>
               <Input
                 id="privacyPolicyUrl"
                 type="url"
                 value={formData.privacyPolicyUrl}
                 onChange={(e) => setFormData({ ...formData, privacyPolicyUrl: e.target.value })}
+                required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="termsOfServiceUrl">Terms of Service URL</Label>
+              <Label htmlFor="termsOfServiceUrl">Terms of Service URL *</Label>
               <Input
                 id="termsOfServiceUrl"
                 type="url"
                 value={formData.termsOfServiceUrl}
                 onChange={(e) => setFormData({ ...formData, termsOfServiceUrl: e.target.value })}
+                required
               />
             </div>
           </div>

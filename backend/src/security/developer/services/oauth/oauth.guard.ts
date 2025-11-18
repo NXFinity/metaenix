@@ -77,8 +77,39 @@ export class OAuthGuard extends AuthGuard('oauth') {
       return true;
     }
 
-    // Has OAuth token, validate it
-    return super.canActivate(context);
+    // Extract token
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+
+    // Decode token to check if it's an OAuth token
+    // OAuth tokens have 'type: oauth' in the payload
+    // We decode without verification (just to check the type field)
+    try {
+      // Simple base64 decode of JWT payload (second part)
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        // Invalid JWT format, let AuthGuard handle it
+        return true;
+      }
+
+      // Decode payload (second part)
+      const payload = JSON.parse(
+        Buffer.from(parts[1], 'base64').toString('utf-8'),
+      );
+
+      // If token doesn't have 'type: oauth', it's a regular JWT token
+      // OAuthGuard should NOT handle regular user JWT tokens - let AuthGuard handle them
+      if (!payload || payload.type !== 'oauth') {
+        // Regular JWT token (user authentication), skip OAuth validation
+        // AuthGuard will handle it
+        return true;
+      }
+
+      // Has OAuth token (type: 'oauth'), validate it with OAuth strategy
+      return super.canActivate(context);
+    } catch (error) {
+      // Token decode failed, let AuthGuard handle it
+      return true;
+    }
   }
 
   handleRequest(err: any, user: any, info: any) {
@@ -88,4 +119,3 @@ export class OAuthGuard extends AuthGuard('oauth') {
     return user;
   }
 }
-

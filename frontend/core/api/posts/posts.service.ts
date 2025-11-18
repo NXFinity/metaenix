@@ -39,7 +39,7 @@ import type {
  * - Search and filtering
  * - Analytics
  */
-export const postsService = {
+const postsService = {
   /**
    * Create a new post
    * @param data - Post creation data
@@ -96,6 +96,36 @@ export const postsService = {
   ): Promise<PaginationResponse<Post>> {
     const response = await apiClient.get<PaginationResponse<Post>>(
       POSTS_ENDPOINTS.GET_BY_USER(userId),
+      { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * Get feed posts (posts from followed users + shared posts)
+   * @param params - Pagination parameters
+   * @returns Paginated feed posts
+   */
+  async getFeed(params?: PaginationParams): Promise<PaginationResponse<Post>> {
+    const response = await apiClient.get<PaginationResponse<Post>>(
+      POSTS_ENDPOINTS.GET_FEED(),
+      { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * Get feed posts for a specific user (posts from users they follow + shared posts)
+   * @param userId - User UUID
+   * @param params - Pagination parameters
+   * @returns Paginated feed posts
+   */
+  async getUserFeed(
+    userId: string,
+    params?: PaginationParams,
+  ): Promise<PaginationResponse<Post>> {
+    const response = await apiClient.get<PaginationResponse<Post>>(
+      POSTS_ENDPOINTS.GET_USER_FEED(userId),
       { params },
     );
     return response.data;
@@ -277,6 +307,36 @@ export const postsService = {
   ): Promise<PaginationResponse<Post>> {
     const response = await apiClient.get<PaginationResponse<Post>>(
       POSTS_ENDPOINTS.GET_BOOKMARKS,
+      { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * Get user's liked posts
+   * @param params - Pagination parameters
+   * @returns Paginated liked posts
+   */
+  async getLikedPosts(
+    params?: PaginationParams,
+  ): Promise<PaginationResponse<Post>> {
+    const response = await apiClient.get<PaginationResponse<Post>>(
+      POSTS_ENDPOINTS.GET_LIKES,
+      { params },
+    );
+    return response.data;
+  },
+
+  /**
+   * Get user's shared posts
+   * @param params - Pagination parameters
+   * @returns Paginated shared posts
+   */
+  async getSharedPosts(
+    params?: PaginationParams,
+  ): Promise<PaginationResponse<Post>> {
+    const response = await apiClient.get<PaginationResponse<Post>>(
+      POSTS_ENDPOINTS.GET_SHARES,
       { params },
     );
     return response.data;
@@ -577,3 +637,4 @@ export const postsService = {
   },
 };
 
+export { postsService };

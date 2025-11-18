@@ -47,7 +47,7 @@ export class CreateApplicationDto {
     required: false,
   })
   @IsArray()
-  @IsUrl({}, { each: true })
+  @IsUrl({ require_tld: false }, { each: true })
   @ArrayMaxSize(10)
   @IsOptional()
   redirectUris?: string[];
@@ -57,36 +57,33 @@ export class CreateApplicationDto {
     example: 'https://yourapp.com/icon.png',
     required: false,
   })
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   @IsOptional()
   iconUrl?: string;
 
   @ApiProperty({
     description: 'Application website URL',
     example: 'https://yourapp.com',
-    required: false,
+    required: true,
   })
-  @IsUrl()
-  @IsOptional()
-  websiteUrl?: string;
+  @IsUrl({ require_tld: false })
+  websiteUrl: string;
 
   @ApiProperty({
     description: 'Privacy policy URL',
     example: 'https://yourapp.com/privacy',
-    required: false,
+    required: true,
   })
-  @IsUrl()
-  @IsOptional()
-  privacyPolicyUrl?: string;
+  @IsUrl({ require_tld: false })
+  privacyPolicyUrl: string;
 
   @ApiProperty({
     description: 'Terms of service URL',
     example: 'https://yourapp.com/terms',
-    required: false,
+    required: true,
   })
-  @IsUrl()
-  @IsOptional()
-  termsOfServiceUrl?: string;
+  @IsUrl({ require_tld: false })
+  termsOfServiceUrl: string;
 
   @ApiProperty({
     description: 'Requested scopes',

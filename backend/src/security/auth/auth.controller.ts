@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  HttpException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -237,7 +238,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Login user with email and password',
-    description: `Authenticates a user with email and password. Creates a session and stores user data including websocketId. Rate limited to ${RATE_LIMITS.LOGIN.LIMIT} attempts per ${RATE_LIMITS.LOGIN.TTL / 60} minutes.`,
+    description: `Authenticates a user with email and password. Returns JWT access token and refresh token. If 2FA is enabled, returns a temporary token for 2FA verification. Rate limited to ${RATE_LIMITS.LOGIN.LIMIT} attempts per ${RATE_LIMITS.LOGIN.TTL / 60} minutes.`,
   })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -266,6 +267,16 @@ export class AuthController {
                 role: { type: 'string', example: 'Member' },
               },
             },
+            accessToken: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'JWT access token (use in Authorization header as Bearer token)',
+            },
+            refreshToken: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'JWT refresh token (use to obtain new access tokens)',
+            },
           },
         },
         {
@@ -277,6 +288,11 @@ export class AuthController {
             },
             requiresTwoFactor: { type: 'boolean', example: true },
             email: { type: 'string', example: 'john.doe@example.com' },
+            tempToken: {
+              type: 'string',
+              example: 'abc123def456...',
+              description: 'Temporary token to use with 2FA verification endpoint',
+            },
           },
         },
       ],
@@ -314,11 +330,8 @@ export class AuthController {
       },
     },
   })
-  async login(
-    @Body() loginDto: LoginDto,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.authService.login(loginDto, request);
+  async login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
   }
 
   @Public()
@@ -328,7 +341,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Verify 2FA code and complete login',
     description:
-      'Verifies the 2FA code after initial login. Completes the authentication process and creates a session.',
+      'Verifies the 2FA code after initial login. Completes the authentication process and returns JWT access token and refresh token.',
   })
   @ApiBody({ type: VerifyLogin2faDto })
   @ApiResponse({
@@ -355,6 +368,16 @@ export class AuthController {
             role: { type: 'string', example: 'Member' },
           },
         },
+        accessToken: {
+          type: 'string',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          description: 'JWT access token (use in Authorization header as Bearer token)',
+        },
+        refreshToken: {
+          type: 'string',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          description: 'JWT refresh token (use to obtain new access tokens)',
+        },
       },
     },
   })
@@ -370,11 +393,8 @@ export class AuthController {
     status: 404,
     description: 'User not found',
   })
-  async verifyLogin2fa(
-    @Body() verifyDto: VerifyLogin2faDto,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.authService.verifyLogin2fa(verifyDto, request);
+  async verifyLogin2fa(@Body() verifyDto: VerifyLogin2faDto) {
+    return this.authService.verifyLogin2fa(verifyDto);
   }
 
   @Post('logout')
@@ -411,8 +431,18 @@ export class AuthController {
       },
     },
   })
-  async logout(@Req() request: AuthenticatedRequest) {
-    await this.authService.logout(request);
+  async logout(
+    @Req() request: AuthenticatedRequest,
+    @Body() body?: { refreshToken?: string },
+  ) {
+    const userId = request.user?.id;
+    if (!userId) {
+      throw new HttpException(
+        'User not authenticated',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    await this.authService.logout(userId, body?.refreshToken);
     return {
       message: 'Logout successful',
     };

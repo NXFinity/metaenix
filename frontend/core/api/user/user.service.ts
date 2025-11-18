@@ -6,12 +6,14 @@ import type {
   UpdateUserResponse,
   DeleteUserResponse,
 } from './types/user.type';
+import type { PaginationParams, PaginationResponse } from '@/core/api/posts/types/post.type';
 
 /**
  * User Service
  * 
  * Handles all user-related API calls including:
  * - Getting user profiles (by ID, username, or current user)
+ * - Getting all users with pagination
  * - Updating user profile
  * - Deleting user account
  */
@@ -22,6 +24,19 @@ export const userService = {
    */
   async getMe(): Promise<User> {
     const response = await apiClient.get<User>(USER_ENDPOINTS.GET_ME);
+    return response.data;
+  },
+
+  /**
+   * Get all users with pagination
+   * @param params - Pagination parameters
+   * @returns Paginated list of users
+   */
+  async getAll(params?: PaginationParams): Promise<PaginationResponse<User>> {
+    const response = await apiClient.get<PaginationResponse<User>>(
+      USER_ENDPOINTS.GET_ALL,
+      { params },
+    );
     return response.data;
   },
 

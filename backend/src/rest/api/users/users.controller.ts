@@ -186,7 +186,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Find user by username (public profile)',
     description:
-      'Retrieves a user profile by username. Returns public profile information.',
+      'Retrieves a user profile by username. Returns public profile information. Private profiles require authentication and following.',
   })
   @ApiParam({
     name: 'username',
@@ -218,6 +218,10 @@ export class UsersController {
     },
   })
   @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Profile is private',
+  })
+  @ApiResponse({
     status: 404,
     description: 'User not found',
     schema: {
@@ -233,8 +237,12 @@ export class UsersController {
       },
     },
   })
-  findByUsername(@Param('username') username: string) {
-    return this.usersService.findByUsername(username);
+  findByUsername(
+    @Param('username') username: string,
+    @Req() request?: AuthenticatedRequest,
+  ) {
+    const currentUserId = request?.user?.id || request?.session?.user?.id;
+    return this.usersService.findByUsername(username, currentUserId);
   }
 
   @Public()

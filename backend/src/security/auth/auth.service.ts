@@ -1,5 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { RedisService } from '@redis/redis';
 
 // Authentication Services
 import { UsersService } from '../../rest/api/users/users.service';
@@ -39,7 +41,100 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly loggingService: LoggingService,
     private readonly twofaService: TwofaService,
+    private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
   ) {}
+
+  // #########################################################
+  // HELPER METHODS
+  // #########################################################
+
+  /**
+   * Generate JWT access token and refresh token for a user
+   */
+  private async generateAuthResponse(user: User) {
+    const { password: _, security, ...userWithoutPassword } = user;
+
+    // Generate JWT access token
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      username: user.username,
+      role: user.role,
+      websocketId: user.websocketId,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+
+    // Generate refresh token (longer expiry)
+    const refreshTokenExpiresIn = this.configService.get<string>(
+      'REFRESH_TOKEN_EXPIRES_IN',
+    ) || '7d';
+    const refreshTokenSecret = this.configService.get<string>(
+      'REFRESH_TOKEN_SECRET',
+    ) || this.configService.get<string>('JWT_SECRET'); // Fallback to JWT_SECRET if not set
+
+    const refreshToken = this.jwtService.sign(
+      { sub: user.id },
+      {
+        secret: refreshTokenSecret,
+        expiresIn: refreshTokenExpiresIn as any,
+      },
+    );
+
+    // Store refresh token in Redis for blacklisting (optional, for logout functionality)
+    const refreshTokenKey = this.redisService.keyBuilder.build(
+      'auth',
+      'refresh-token',
+      user.id,
+      refreshToken.substring(refreshToken.length - 20), // Last 20 chars as identifier
+    );
+    await this.redisService.set(
+      refreshTokenKey,
+      'valid',
+      this.parseExpiryToSeconds(refreshTokenExpiresIn),
+    );
+
+    this.loggingService.log(
+      `User logged in: ${user.email}`,
+      'AuthService',
+      {
+        category: LogCategory.AUTHENTICATION,
+        metadata: { userId: user.id, email: user.email },
+      },
+    );
+
+    return {
+      message: 'Login successful',
+      user: userWithoutPassword,
+      accessToken,
+      refreshToken,
+    };
+  }
+
+  /**
+   * Parse expiry string (e.g., "7d", "2h", "30m") to seconds
+   */
+  private parseExpiryToSeconds(expiry: string): number {
+    const match = expiry.match(/^(\d+)([smhd])$/);
+    if (!match) return 7 * 24 * 60 * 60; // Default 7 days
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+
+    switch (unit) {
+      case 's':
+        return value;
+      case 'm':
+        return value * 60;
+      case 'h':
+        return value * 60 * 60;
+      case 'd':
+        return value * 24 * 60 * 60;
+      default:
+        return 7 * 24 * 60 * 60;
+    }
+  }
 
   // #########################################################
   // VALIDATE USER - ALWAYS AT THE TOP
@@ -238,7 +333,7 @@ export class AuthService {
   // USER LOGIN & LOGOUT
   // #########################################################
 
-  async login(loginDto: LoginDto, request: AuthenticatedRequest) {
+  async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
     // Find user with security relation
@@ -283,133 +378,70 @@ export class AuthService {
 
     // Check if 2FA is enabled
     if (user.security.isTwoFactorEnabled) {
-      // Store temporary login data in session (not authenticated yet)
-      if (request.session) {
-        request.session.pendingLogin = {
+      // Generate temporary token for 2FA verification
+      const tempToken = crypto.randomBytes(32).toString('hex');
+      const PENDING_LOGIN_TIMEOUT = 5 * 60; // 5 minutes in seconds
+
+      // Store temporary login data in Redis
+      await this.redisService.set(
+        this.redisService.keyBuilder.build('auth', 'pending-login', tempToken),
+        JSON.stringify({
           userId: user.id,
           email: user.email,
           passwordVerified: true,
-          createdAt: new Date(), // Timestamp for timeout checking
-        };
-      }
+          createdAt: new Date().toISOString(),
+        }),
+        PENDING_LOGIN_TIMEOUT,
+      );
 
-      // Save session temporarily
-      if (request.session) {
-        await new Promise<void>((resolve, reject) => {
-          request.session!.save((err: any) => {
-            if (err) {
-              this.loggingService.error(
-                'Session save error',
-                err instanceof Error ? err.stack : undefined,
-                'AuthService',
-                {
-                  category: LogCategory.AUTHENTICATION,
-                  error: err instanceof Error ? err : new Error(String(err)),
-                  metadata: { userId: user.id, email: user.email },
-                },
-              );
-              reject(
-                new HttpException(
-                  'Failed to save session',
-                  HttpStatus.INTERNAL_SERVER_ERROR,
-                ),
-              );
-            } else {
-              resolve();
-            }
-          });
-        });
-      }
-
-      // Return requiresTwoFactor flag
+      // Return requiresTwoFactor flag with temp token
       return {
         message: 'Two-factor authentication required',
         requiresTwoFactor: true,
         email: user.email,
+        tempToken, // Client will send this back with 2FA code
       };
     }
 
-    // No 2FA - proceed with normal login
-    // Store user in session (without password)
-    const { password: _, security, ...userWithoutPassword } = user;
-    if (request.session) {
-      request.session.user = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        displayName: user.displayName,
-        role: user.role,
-        websocketId: user.websocketId,
-        isVerified: user.security.isVerified,
-      };
-    }
-
-    // Save session - await to ensure session is saved before returning
-    if (!request.session) {
-      throw new HttpException(
-        'Session not available',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      request.session!.save((err: any) => {
-        if (err) {
-          this.loggingService.error(
-            'Session save error',
-            err instanceof Error ? err.stack : undefined,
-            'AuthService',
-            {
-              category: LogCategory.AUTHENTICATION,
-              error: err instanceof Error ? err : new Error(String(err)),
-              metadata: { userId: user.id, email: user.email },
-            },
-          );
-          reject(
-            new HttpException(
-              'Failed to save session',
-              HttpStatus.INTERNAL_SERVER_ERROR,
-            ),
-          );
-        } else {
-          resolve();
-        }
-      });
-    });
-
-    return {
-      message: 'Login successful',
-      user: userWithoutPassword,
-    };
+    // No 2FA - proceed with normal login and generate JWT tokens
+    return this.generateAuthResponse(user);
   }
 
   /**
    * Verify 2FA code and complete login
    */
-  async verifyLogin2fa(
-    verifyDto: { email: string; code: string },
-    request: AuthenticatedRequest,
-  ) {
-    const { email, code } = verifyDto;
+  async verifyLogin2fa(verifyDto: {
+    email: string;
+    code: string;
+    tempToken: string;
+  }) {
+    const { email, code, tempToken } = verifyDto;
 
-    // Check session for pending login
-    if (!request.session || !request.session.pendingLogin) {
+    // Retrieve pending login from Redis
+    const pendingLoginKey = this.redisService.keyBuilder.build(
+      'auth',
+      'pending-login',
+      tempToken,
+    );
+    const pendingLogin = await this.redisService.get<{
+      userId: string;
+      email: string;
+      passwordVerified: boolean;
+      createdAt: string;
+    }>(pendingLoginKey);
+
+    if (!pendingLogin) {
       throw new HttpException(
         'No pending login found. Please login again.',
         HttpStatus.BAD_REQUEST,
       );
     }
 
-    const pendingLogin = request.session.pendingLogin;
-
-    // Check session timeout (5 minutes)
+    // Check timeout (already handled by Redis TTL, but verify)
+    const createdAt = new Date(pendingLogin.createdAt);
     const PENDING_LOGIN_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-    if (
-      pendingLogin.createdAt &&
-      Date.now() - new Date(pendingLogin.createdAt).getTime() >
-        PENDING_LOGIN_TIMEOUT
-    ) {
-      delete request.session.pendingLogin;
+    if (Date.now() - createdAt.getTime() > PENDING_LOGIN_TIMEOUT) {
+      await this.redisService.del(pendingLoginKey);
       throw new HttpException(
         'Login session expired. Please login again.',
         HttpStatus.BAD_REQUEST,
@@ -418,24 +450,18 @@ export class AuthService {
 
     // Verify email matches
     if (pendingLogin.email !== email) {
-      throw new HttpException(
-        'Email mismatch',
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new HttpException('Email mismatch', HttpStatus.BAD_REQUEST);
     }
 
     // Find user
     const user = await this.usersService.findUserWithSecurityByEmail(email);
     if (!user || user.id !== pendingLogin.userId) {
-      throw new HttpException(
-        'User not found',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
     }
 
     // Verify 2FA is still enabled (prevent bypass)
     if (!user.security || !user.security.isTwoFactorEnabled) {
-      delete request.session.pendingLogin;
+      await this.redisService.del(pendingLoginKey);
       throw new HttpException(
         '2FA is no longer enabled. Please login again.',
         HttpStatus.BAD_REQUEST,
@@ -447,90 +473,40 @@ export class AuthService {
     try {
       await this.twofaService.verifyTwoFactor(user.id, verifyTwoFactorDto);
     } catch (error) {
-      throw new HttpException(
-        'Invalid 2FA code',
-        HttpStatus.UNAUTHORIZED,
-      );
+      throw new HttpException('Invalid 2FA code', HttpStatus.UNAUTHORIZED);
     }
 
-    // Clear pending login
-    delete request.session.pendingLogin;
+    // Clear pending login from Redis
+    await this.redisService.del(pendingLoginKey);
 
-    // Store user in session (without password)
-    const { password: _, security, ...userWithoutPassword } = user;
-    if (request.session) {
-      request.session.user = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        displayName: user.displayName,
-        role: user.role,
-        websocketId: user.websocketId,
-        isVerified: user.security.isVerified,
-      };
-    }
-
-    // Save session
-    await new Promise<void>((resolve, reject) => {
-      request.session!.save((err: any) => {
-        if (err) {
-          this.loggingService.error(
-            'Session save error',
-            err instanceof Error ? err.stack : undefined,
-            'AuthService',
-            {
-              category: LogCategory.AUTHENTICATION,
-              error: err instanceof Error ? err : new Error(String(err)),
-              metadata: { userId: user.id, email: user.email },
-            },
-          );
-          reject(
-            new HttpException(
-              'Failed to save session',
-              HttpStatus.INTERNAL_SERVER_ERROR,
-            ),
-          );
-        } else {
-          resolve();
-        }
-      });
-    });
-
-    return {
-      message: 'Login successful',
-      user: userWithoutPassword,
-    };
+    // Generate JWT tokens and return
+    return this.generateAuthResponse(user);
   }
 
-  async logout(request: AuthenticatedRequest) {
-    if (!request.session) {
-      // Session already destroyed or doesn't exist
-      return Promise.resolve();
+  async logout(userId: string, refreshToken?: string) {
+    // If refresh token provided, blacklist it
+    if (refreshToken) {
+      const refreshTokenKey = this.redisService.keyBuilder.build(
+        'auth',
+        'refresh-token',
+        userId,
+        refreshToken.substring(refreshToken.length - 20),
+      );
+      await this.redisService.del(refreshTokenKey);
     }
 
-    return new Promise<void>((resolve, reject) => {
-      request.session!.destroy((err: any) => {
-        if (err) {
-          this.loggingService.error(
-            'Session destroy error',
-            err instanceof Error ? err.stack : undefined,
-            'AuthService',
-            {
-              category: LogCategory.AUTHENTICATION,
-              error: err instanceof Error ? err : new Error(String(err)),
-            },
-          );
-          reject(
-            new HttpException(
-              'Failed to logout',
-              HttpStatus.INTERNAL_SERVER_ERROR,
-            ),
-          );
-        } else {
-          resolve();
-        }
-      });
-    });
+    // Optionally: Blacklist all tokens for this user (if implementing token revocation)
+    // For now, we'll just log the logout
+    this.loggingService.log(
+      `User logged out: ${userId}`,
+      'AuthService',
+      {
+        category: LogCategory.AUTHENTICATION,
+        metadata: { userId },
+      },
+    );
+
+    return Promise.resolve();
   }
 
   // #########################################################

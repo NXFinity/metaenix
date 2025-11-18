@@ -54,9 +54,9 @@ export const RATE_LIMITS = {
     TTL: 900, // 15 minutes in seconds
   },
 
-  // Login: 5 attempts per 15 minutes
+  // Login: 30 attempts per 15 minutes (increased for development/testing)
   LOGIN: {
-    LIMIT: 5,
+    LIMIT: 30,
     TTL: 900, // 15 minutes in seconds
   },
 

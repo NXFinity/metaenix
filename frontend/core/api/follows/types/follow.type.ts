@@ -107,6 +107,15 @@ export interface EnhancedFollowAnalytics extends FollowAnalytics {
     endDate: string;
     followersGained: number;
   };
+  growthTrends?: {
+    daily: Array<{ date: string; followers: number; following: number }>;
+    weekly: Array<{ week: string; followers: number; following: number }>;
+  };
+  engagementMetrics?: {
+    averageFollowersPerDay: number;
+    averageFollowingPerDay: number;
+    followerRetentionRate: number;
+  };
 }
 
 export interface FollowSuggestion {

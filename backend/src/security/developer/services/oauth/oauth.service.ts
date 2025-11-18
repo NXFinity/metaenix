@@ -83,12 +83,36 @@ export class OAuthService {
 
     // Parse and validate scopes
     const requestedScopes = scope.split(' ').filter((s) => s.length > 0);
-    const validScopes = this.scopeService.validateRequestedScopes(
-      requestedScopes,
-      application.scopes || [],
-    );
+    
+    if (requestedScopes.length === 0) {
+      throw new BadRequestException('At least one scope must be requested');
+    }
+
+    // Check if scopes are valid
+    const { valid: validScopeIds, invalid: invalidScopeIds } = 
+      this.scopeService.validateScopesList(requestedScopes);
+    
+    if (invalidScopeIds.length > 0) {
+      const allScopes = this.scopeService.getAllScopes().map(s => s.id);
+      throw new BadRequestException(
+        `Invalid scopes requested: ${invalidScopeIds.join(', ')}. ` +
+        `Available scopes: ${allScopes.join(', ')}`
+      );
+    }
+
+    // Check if scopes are approved for this application
+    const approvedScopes = application.scopes || [];
+    const validScopes = validScopeIds.filter((scopeId) => approvedScopes.includes(scopeId));
+    
     if (validScopes.length === 0) {
-      throw new BadRequestException('No valid scopes requested or scopes not approved for this application');
+      const unapprovedScopes = validScopeIds.filter((scopeId) => !approvedScopes.includes(scopeId));
+      throw new BadRequestException(
+        `No approved scopes found. ` +
+        `Requested scopes: ${requestedScopes.join(', ')}. ` +
+        `Approved scopes for this application: ${approvedScopes.length > 0 ? approvedScopes.join(', ') : 'none'}. ` +
+        `Unapproved scopes: ${unapprovedScopes.join(', ')}. ` +
+        `Please update your application to include the requested scopes.`
+      );
     }
 
     // Generate authorization code

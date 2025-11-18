@@ -4,6 +4,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, MoreThanOrEqual, Between } from 'typeorm';
 import { Follow } from './assets/entities/follow.entity';
@@ -34,6 +35,7 @@ export class FollowsService {
     private readonly cachingService: CachingService,
     private readonly redisService: RedisService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly configService: ConfigService,
   ) {}
 
   // #########################################################
@@ -812,6 +814,9 @@ export class FollowsService {
 
       let suggestions: User[];
 
+      // Get system admin username to exclude from suggestions
+      const systemUsername = this.configService.get<string>('SYSTEM_USERNAME') || 'systemadmin';
+
       if (followingIds.length === 0) {
         // If user follows no one, suggest popular users
         suggestions = await this.userRepository
@@ -819,6 +824,7 @@ export class FollowsService {
           .leftJoinAndSelect('user.profile', 'profile')
           .where('user.id != :userId', { userId })
           .andWhere('user.isPublic = :isPublic', { isPublic: true })
+          .andWhere('user.username != :systemUsername', { systemUsername })
           .select([
             'user.id',
             'user.username',
@@ -868,11 +874,12 @@ export class FollowsService {
         if (sortedSuggestions.length === 0) {
           suggestions = [];
         } else {
-          // Fetch full user data for suggestions
+          // Fetch full user data for suggestions, exclude systemadmin
           suggestions = await this.userRepository
             .createQueryBuilder('user')
             .leftJoinAndSelect('user.profile', 'profile')
             .where('user.id IN (:...userIds)', { userIds: sortedSuggestions })
+            .andWhere('user.username != :systemUsername', { systemUsername })
             .select([
               'user.id',
               'user.username',
@@ -930,6 +937,8 @@ export class FollowsService {
     newFollowersLast30Days: number;
     unfollowsLast7Days: number;
     unfollowsLast30Days: number;
+    followersGrowth?: any;
+    followingGrowth?: any;
     topFollowers: Array<{
       userId: string;
       username: string;
@@ -1000,15 +1009,75 @@ export class FollowsService {
         .createQueryBuilder('follow')
         .leftJoinAndSelect('follow.follower', 'follower')
         .where('follow.followingId = :userId', { userId })
+        .andWhere('follow.dateDeleted IS NULL')
         .select([
+          'follow.id',
           'follower.id',
           'follower.username',
           'follower.displayName',
           'follower.followersCount',
         ])
         .orderBy('follower.followersCount', 'DESC')
+        .addOrderBy('follow.id', 'ASC')
         .take(10)
         .getMany();
+
+      // Get growth data for last 30 days (optimized - single query)
+      const thirtyDaysAgoForGrowth = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      thirtyDaysAgoForGrowth.setHours(0, 0, 0, 0);
+
+      // Fetch all follows in the date range in a single query
+      const [followersData, followingData] = await Promise.all([
+        this.followRepository
+          .createQueryBuilder('follow')
+          .select('DATE(follow.dateCreated)', 'date')
+          .addSelect('COUNT(*)', 'count')
+          .where('follow.followingId = :userId', { userId })
+          .andWhere('follow.dateCreated >= :startDate', { startDate: thirtyDaysAgoForGrowth })
+          .groupBy('DATE(follow.dateCreated)')
+          .getRawMany(),
+        this.followRepository
+          .createQueryBuilder('follow')
+          .select('DATE(follow.dateCreated)', 'date')
+          .addSelect('COUNT(*)', 'count')
+          .where('follow.followerId = :userId', { userId })
+          .andWhere('follow.dateCreated >= :startDate', { startDate: thirtyDaysAgoForGrowth })
+          .groupBy('DATE(follow.dateCreated)')
+          .getRawMany(),
+      ]);
+
+      // Create maps for quick lookup
+      const followersMap = new Map<string, number>();
+      followersData.forEach((item) => {
+        const dateKey = new Date(item.date).toISOString().split('T')[0];
+        followersMap.set(dateKey, parseInt(item.count, 10));
+      });
+
+      const followingMap = new Map<string, number>();
+      followingData.forEach((item) => {
+        const dateKey = new Date(item.date).toISOString().split('T')[0];
+        followingMap.set(dateKey, parseInt(item.count, 10));
+      });
+
+      // Build growth arrays with all 30 days (including zeros)
+      const growthData: Array<{ period: string; count: number }> = [];
+      const followingGrowthData: Array<{ period: string; count: number }> = [];
+      
+      for (let i = 29; i >= 0; i--) {
+        const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        date.setHours(0, 0, 0, 0);
+        const dateKey = date.toISOString().split('T')[0];
+        const periodLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        growthData.push({ 
+          period: periodLabel, 
+          count: followersMap.get(dateKey) || 0 
+        });
+        followingGrowthData.push({ 
+          period: periodLabel, 
+          count: followingMap.get(dateKey) || 0 
+        });
+      }
 
       return {
         totalFollowers: user.followersCount || 0,
@@ -1017,10 +1086,13 @@ export class FollowsService {
         newFollowersLast30Days: newFollowers30Days,
         unfollowsLast7Days: unfollows7Days,
         unfollowsLast30Days: unfollows30Days,
+        followersGrowth: growthData,
+        followingGrowth: followingGrowthData,
         topFollowers: topFollowers.map((f) => ({
           userId: f.follower.id,
           username: f.follower.username,
           displayName: f.follower.displayName,
+          followersCount: f.follower.followersCount || 0,
         })),
       };
     } catch (error) {
@@ -1235,6 +1307,8 @@ export class FollowsService {
     newFollowersLast30Days: number;
     unfollowsLast7Days: number;
     unfollowsLast30Days: number;
+    followersGrowth?: any;
+    followingGrowth?: any;
     topFollowers: Array<{
       userId: string;
       username: string;
@@ -1248,6 +1322,13 @@ export class FollowsService {
       averageFollowersPerDay: number;
       averageFollowingPerDay: number;
       followerRetentionRate: number; // Percentage of followers who remain after 30 days
+    };
+    growthRate?: number;
+    engagementRate?: number;
+    peakGrowthPeriod?: {
+      startDate: string;
+      endDate: string;
+      followersGained: number;
     };
   }> {
     try {
@@ -1264,84 +1345,144 @@ export class FollowsService {
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-      // Get basic analytics
-      const basicAnalytics = await this.getFollowAnalytics(userId);
+      // Get basic counts (reuse from daily trends query)
+      const [newFollowers7Days, newFollowers30Days] = await Promise.all([
+        this.followRepository.count({
+          where: {
+            followingId: userId,
+            dateCreated: MoreThanOrEqual(sevenDaysAgo),
+          },
+        }),
+        this.followRepository.count({
+          where: {
+            followingId: userId,
+            dateCreated: MoreThanOrEqual(thirtyDaysAgo),
+          },
+        }),
+      ]);
 
-      // Get daily growth trends for last 30 days
+      // Get top followers
+      const topFollowers = await this.followRepository
+        .createQueryBuilder('follow')
+        .leftJoinAndSelect('follow.follower', 'follower')
+        .where('follow.followingId = :userId', { userId })
+        .andWhere('follow.dateDeleted IS NULL')
+        .select([
+          'follow.id',
+          'follower.id',
+          'follower.username',
+          'follower.displayName',
+          'follower.followersCount',
+        ])
+        .orderBy('follower.followersCount', 'DESC')
+        .addOrderBy('follow.id', 'ASC')
+        .take(10)
+        .getMany();
+
+      // Get daily growth trends for last 30 days (optimized - reuse from basic analytics)
+      const thirtyDaysAgoForTrends = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      thirtyDaysAgoForTrends.setHours(0, 0, 0, 0);
+
+      // Fetch all follows in the date range in a single query
+      const [followersTrendData, followingTrendData] = await Promise.all([
+        this.followRepository
+          .createQueryBuilder('follow')
+          .select('DATE(follow.dateCreated)', 'date')
+          .addSelect('COUNT(*)', 'count')
+          .where('follow.followingId = :userId', { userId })
+          .andWhere('follow.dateCreated >= :startDate', { startDate: thirtyDaysAgoForTrends })
+          .groupBy('DATE(follow.dateCreated)')
+          .getRawMany(),
+        this.followRepository
+          .createQueryBuilder('follow')
+          .select('DATE(follow.dateCreated)', 'date')
+          .addSelect('COUNT(*)', 'count')
+          .where('follow.followerId = :userId', { userId })
+          .andWhere('follow.dateCreated >= :startDate', { startDate: thirtyDaysAgoForTrends })
+          .groupBy('DATE(follow.dateCreated)')
+          .getRawMany(),
+      ]);
+
+      // Create maps for quick lookup
+      const followersTrendMap = new Map<string, number>();
+      followersTrendData.forEach((item) => {
+        const dateKey = new Date(item.date).toISOString().split('T')[0];
+        followersTrendMap.set(dateKey, parseInt(item.count, 10));
+      });
+
+      const followingTrendMap = new Map<string, number>();
+      followingTrendData.forEach((item) => {
+        const dateKey = new Date(item.date).toISOString().split('T')[0];
+        followingTrendMap.set(dateKey, parseInt(item.count, 10));
+      });
+
+      // Build daily trends array with all 30 days (including zeros)
       const dailyTrends: Array<{
         date: string;
         followers: number;
         following: number;
       }> = [];
+      
       for (let i = 29; i >= 0; i--) {
         const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-        const dateStart = new Date(date);
-        dateStart.setHours(0, 0, 0, 0);
-        const dateEnd = new Date(date);
-        dateEnd.setHours(23, 59, 59, 999);
-
-        const [followersCount, followingCount] = await Promise.all([
-          this.followRepository.count({
-            where: {
-              followingId: userId,
-              dateCreated: Between(dateStart, dateEnd),
-            },
-          }),
-          this.followRepository.count({
-            where: {
-              followerId: userId,
-              dateCreated: Between(dateStart, dateEnd),
-            },
-          }),
-        ]);
+        date.setHours(0, 0, 0, 0);
+        const dateKey = date.toISOString().split('T')[0];
 
         dailyTrends.push({
-          date: dateStart.toISOString().split('T')[0],
-          followers: followersCount,
-          following: followingCount,
+          date: dateKey,
+          followers: followersTrendMap.get(dateKey) || 0,
+          following: followingTrendMap.get(dateKey) || 0,
         });
       }
 
-      // Get weekly growth trends for last 12 weeks
+      // Get weekly growth trends for last 12 weeks (optimized - reuse daily data)
+      const twelveWeeksAgo = new Date(now.getTime() - 12 * 7 * 24 * 60 * 60 * 1000);
+      twelveWeeksAgo.setHours(0, 0, 0, 0);
+
+      // Group daily trends data by week
+      const followersWeeklyMap = new Map<string, number>();
+      const followingWeeklyMap = new Map<string, number>();
+
+      dailyTrends.forEach((trend) => {
+        const date = new Date(trend.date);
+        const weekStart = new Date(date);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+        weekStart.setHours(0, 0, 0, 0);
+        const weekKey = weekStart.toISOString().split('T')[0];
+        
+        const currentFollowers = followersWeeklyMap.get(weekKey) || 0;
+        const currentFollowing = followingWeeklyMap.get(weekKey) || 0;
+        followersWeeklyMap.set(weekKey, currentFollowers + trend.followers);
+        followingWeeklyMap.set(weekKey, currentFollowing + trend.following);
+      });
+
+      // Build weekly trends array
       const weeklyTrends: Array<{
         week: string;
         followers: number;
         following: number;
       }> = [];
+      
       for (let i = 11; i >= 0; i--) {
         const weekStart = new Date(now.getTime() - i * 7 * 24 * 60 * 60 * 1000);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
         weekStart.setHours(0, 0, 0, 0);
         const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
         weekEnd.setHours(23, 59, 59, 999);
-
-        const [followersCount, followingCount] = await Promise.all([
-          this.followRepository.count({
-            where: {
-              followingId: userId,
-              dateCreated: Between(weekStart, weekEnd),
-            },
-          }),
-          this.followRepository.count({
-            where: {
-              followerId: userId,
-              dateCreated: Between(weekStart, weekEnd),
-            },
-          }),
-        ]);
+        const weekKey = weekStart.toISOString().split('T')[0];
 
         weeklyTrends.push({
           week: `${weekStart.toISOString().split('T')[0]} to ${weekEnd.toISOString().split('T')[0]}`,
-          followers: followersCount,
-          following: followingCount,
+          followers: followersWeeklyMap.get(weekKey) || 0,
+          following: followingWeeklyMap.get(weekKey) || 0,
         });
       }
 
       // Calculate engagement metrics
       const totalDays = 30;
       const averageFollowersPerDay =
-        basicAnalytics.newFollowersLast30Days / totalDays;
-      const averageFollowingPerDay = basicAnalytics.totalFollowing / totalDays;
+        newFollowers30Days / totalDays;
+      const averageFollowingPerDay = (user.followingCount || 0) / totalDays;
 
       // Calculate follower retention rate (followers who followed 30+ days ago and still follow)
       const oldFollowers = await this.followRepository.count({
@@ -1355,8 +1496,39 @@ export class FollowsService {
       const followerRetentionRate =
         oldFollowers > 0 ? (currentFollowers / oldFollowers) * 100 : 100;
 
+      // Transform daily trends to match frontend format
+      const followersGrowth = dailyTrends.map((t) => ({
+        period: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        count: t.followers,
+      }));
+      
+      const followingGrowth = dailyTrends.map((t) => ({
+        period: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        count: t.following,
+      }));
+
       return {
-        ...basicAnalytics,
+        totalFollowers: user.followersCount || 0,
+        totalFollowing: user.followingCount || 0,
+        newFollowersLast7Days: newFollowers7Days,
+        newFollowersLast30Days: newFollowers30Days,
+        unfollowsLast7Days: 0, // Can be calculated from audit logs if needed
+        unfollowsLast30Days: 0, // Can be calculated from audit logs if needed
+        followersGrowth,
+        followingGrowth,
+        topFollowers: topFollowers.map((f) => ({
+          userId: f.follower.id,
+          username: f.follower.username,
+          displayName: f.follower.displayName,
+          followersCount: f.follower.followersCount || 0,
+        })),
+        growthRate: averageFollowersPerDay > 0 ? Math.round((averageFollowersPerDay / (user.followersCount || 1)) * 10000) / 100 : 0,
+        engagementRate: Math.round((averageFollowersPerDay / (user.followersCount || 1)) * 10000) / 100,
+        peakGrowthPeriod: {
+          startDate: dailyTrends[0]?.date || now.toISOString(),
+          endDate: dailyTrends[dailyTrends.length - 1]?.date || now.toISOString(),
+          followersGained: newFollowers30Days,
+        },
         growthTrends: {
           daily: dailyTrends,
           weekly: weeklyTrends,

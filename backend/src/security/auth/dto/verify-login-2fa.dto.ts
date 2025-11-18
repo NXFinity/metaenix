@@ -18,5 +18,13 @@ export class VerifyLogin2faDto {
   @IsString()
   @Length(6, 10)
   code: string;
+
+  @ApiProperty({
+    description: 'Temporary token received from login endpoint when 2FA is required',
+    example: 'abc123def456...',
+  })
+  @IsNotEmpty()
+  @IsString()
+  tempToken: string;
 }
 

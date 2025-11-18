@@ -20,11 +20,13 @@ import {
   UpdateApplicationDto,
   RegisterDeveloperDto,
 } from './assets/dto';
-import { ApplicationEnvironment } from './assets/enum/application-environment.enum';
-import { ApplicationStatus } from './assets/enum/application-status.enum';
+import { ApplicationEnvironment } from './assets/enum';
+import { ApplicationStatus } from './assets/enum';
 import { BCRYPT_SALT_ROUNDS } from '../../common/constants/app.constants';
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
+import {ROLE} from "../roles";
+import { ScopeService } from './services/scopes/scope.service';
 
 @Injectable()
 export class DeveloperService {
@@ -38,6 +40,7 @@ export class DeveloperService {
     @InjectRepository(OAuthToken)
     private readonly oauthTokenRepository: Repository<OAuthToken>,
     private readonly loggingService: LoggingService,
+    private readonly scopeService: ScopeService,
   ) {}
 
   // #########################################################
@@ -59,21 +62,25 @@ export class DeveloperService {
     };
     errors: string[];
   }> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: ['security'],
-    });
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.security', 'security')
+      .where('user.id = :userId', { userId })
+      .getOne();
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
     const errors: string[] = [];
+    // Check if user is Administrator - enum comparison
+    const isAdministrator = user.role === ROLE.Administrator;
+    
     const requirements = {
       profileComplete: this.checkProfileCompletion(user),
       emailVerified: user.security?.isVerified === true,
       twoFactorEnabled: user.security?.isTwoFactorEnabled === true,
-      accountAge: this.checkAccountAge(user.dateCreated),
+      accountAge: isAdministrator ? true : this.checkAccountAge(user.dateCreated),
       accountStanding: await this.checkAccountStanding(user),
       accountActivity: await this.checkAccountActivity(userId),
     };
@@ -87,7 +94,8 @@ export class DeveloperService {
     if (!requirements.twoFactorEnabled) {
       errors.push('Two-factor authentication must be enabled');
     }
-    if (!requirements.accountAge) {
+    // Only add account age error if user is NOT an administrator
+    if (!requirements.accountAge && !isAdministrator) {
       errors.push('Account must be at least 30 days old');
     }
     if (!requirements.accountStanding) {
@@ -220,11 +228,11 @@ export class DeveloperService {
     // We'll use the logging service to check for recent user activity
     // For now, we'll check if there are any audit logs for this user in the last 30 days
     // This is a simplified check - in production, you might want to check specific activity types
-    
+
     // Since we don't have direct access to AuditLog repository, we'll use a simpler approach:
     // Check if user has been active recently by checking their last update timestamp
     // or we can check for recent posts if PostsService is available
-    
+
     // For now, we'll check the user's dateUpdated field as a proxy for activity
     // If the account was updated recently (within 30 days), consider it active
     const user = await this.userRepository.findOne({
@@ -306,6 +314,14 @@ export class DeveloperService {
       createDto.environment === ApplicationEnvironment.PRODUCTION ? 10000 : 1000;
 
     // Create application
+    // If no scopes provided, use default scopes (auto-approved)
+    let applicationScopes = createDto.scopes || [];
+    if (applicationScopes.length === 0) {
+      // Auto-approve default scopes for new applications
+      const defaultScopes = this.scopeService.getDefaultScopes();
+      applicationScopes = defaultScopes.map(scope => scope.id);
+    }
+
     const application = this.applicationRepository.create({
       ...createDto,
       clientId,
@@ -314,7 +330,7 @@ export class DeveloperService {
       developerId,
       status,
       rateLimit,
-      scopes: createDto.scopes || [],
+      scopes: applicationScopes,
     });
 
     const savedApplication = await this.applicationRepository.save(application);
@@ -377,6 +393,24 @@ export class DeveloperService {
     updateDto: UpdateApplicationDto,
   ): Promise<Application> {
     const application = await this.getApplication(applicationId, developerId);
+
+    // If scopes are being updated, validate them
+    if (updateDto.scopes !== undefined) {
+      if (updateDto.scopes.length === 0) {
+        // If no scopes provided, use default scopes
+        const defaultScopes = this.scopeService.getDefaultScopes();
+        updateDto.scopes = defaultScopes.map(scope => scope.id);
+      } else {
+        // Validate that all requested scopes are valid
+        const { valid, invalid } = this.scopeService.validateScopesList(updateDto.scopes);
+        if (invalid.length > 0) {
+          throw new BadRequestException(
+            `Invalid scopes: ${invalid.join(', ')}. Available scopes: ${this.scopeService.getAllScopes().map(s => s.id).join(', ')}`
+          );
+        }
+        updateDto.scopes = valid;
+      }
+    }
 
     // Update fields (environment cannot be changed - not in UpdateApplicationDto)
     Object.assign(application, updateDto);

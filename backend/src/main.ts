@@ -5,13 +5,6 @@ import { getCorsOriginFunction, getCorsOrigins } from './config/cors.config';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { setupSwagger } from './functions/swagger.function';
-import * as session from 'express-session';
-import * as cookieParser from 'cookie-parser';
-import { SessionStoreConfig } from './config/session-store.config';
-import {
-  SESSION_COOKIE_NAME,
-  SESSION_MAX_AGE_MS,
-} from './common/constants/app.constants';
 
 const chalk = require('chalk');
 const logger = new Logger('Bootstrap');
@@ -57,40 +50,8 @@ async function bootstrap() {
   // Initialize the app to ensure all modules are initialized (including Redis)
   await app.init();
 
-  // Cookie parser middleware (required for sessions)
-  app.use(cookieParser());
-
-  // Get Redis session store (will be initialized after Redis connects)
-  const sessionStoreConfig = app.get(SessionStoreConfig);
-  const sessionStore = sessionStoreConfig.getStore();
-
-  // Session middleware with Redis store
-  app.use(
-    session({
-      store: sessionStore,
-      secret: (() => {
-        const secret = configService.get<string>('SESSION_SECRET');
-        if (!secret) {
-          throw new Error('SESSION_SECRET environment variable is required');
-        }
-        return secret;
-      })(),
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        httpOnly: true,
-        secure: configService.get<string>('NODE_ENV') === 'production',
-        sameSite: 'lax',
-        maxAge: SESSION_MAX_AGE_MS,
-      },
-      name: SESSION_COOKIE_NAME,
-    }),
-  );
-
-  logger.log('Session store configured with Redis');
-
   // Determine which database is being used
-  const nodeEnv = configService.get('NODE_ENV');
+  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
   const isProductionEnv = nodeEnv === 'production';
   const database = isProductionEnv
     ? configService.get('POSTGRES_DB')

@@ -1,0 +1,56 @@
+# GitHub Sponsors Configuration
+# Copy this file to .github/FUNDING.yml in the repository root for GitHub to recognize it
+# Or configure funding options directly in GitHub repository settings
+
+# GitHub Sponsors
+# Add your GitHub username(s) here
+github: # Replace with your GitHub username, e.g., ['yourusername']
+
+# Patreon
+# Add your Patreon username here
+patreon: # Replace with your Patreon username, e.g., 'yourusername'
+
+# Open Collective
+# Add your Open Collective username here
+open_collective: # Replace with your Open Collective username, e.g., 'your-org-name'
+
+# Ko-fi
+# Add your Ko-fi username here
+ko_fi: # Replace with your Ko-fi username, e.g., 'yourusername'
+
+# Tidelift
+# Add your Tidelift platform/package name here
+# Format: platform-name/package-name
+tidelift: # Replace with your Tidelift subscription, e.g., 'npm/your-package'
+
+# Community Bridge
+# Add your Community Bridge project name here
+community_bridge: # Replace with your Community Bridge project, e.g., 'your-project-name'
+
+# Liberapay
+# Add your Liberapay username here
+liberapay: # Replace with your Liberapay username, e.g., 'yourusername'
+
+# IssueHunt
+# Add your IssueHunt username here
+issuehunt: # Replace with your IssueHunt username, e.g., 'yourusername'
+
+# Otechie
+# Add your Otechie username here
+otechie: # Replace with your Otechie username, e.g., 'yourusername'
+
+# LFX Crowdfunding
+# Add your LFX Crowdfunding project name here
+lfx_crowdfunding: # Replace with your LFX project, e.g., 'your-project-name'
+
+# Custom funding URLs
+# Add custom funding links (PayPal, Buy Me a Coffee, etc.)
+# Format: ['Display Name': 'URL']
+custom: # Replace with your custom funding URLs, e.g., ['PayPal': 'https://paypal.me/yourusername', 'Buy Me a Coffee': 'https://buymeacoffee.com/yourusername']
+
+# Example configuration (uncomment and customize):
+# github: ['yourusername']
+# patreon: 'yourusername'
+# ko_fi: 'yourusername'
+# custom: ['PayPal': 'https://paypal.me/yourusername', 'Buy Me a Coffee': 'https://buymeacoffee.com/yourusername']
+

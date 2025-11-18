@@ -16,6 +16,7 @@ import { Report } from './assets/entities/report.entity';
 import { Reaction } from './assets/entities/reaction.entity';
 import { Collection } from './assets/entities/collection.entity';
 import { User } from '../../assets/entities/user.entity';
+import { Follow } from '../follows/assets/entities/follow.entity';
 import {
   CreatePostDto,
   UpdatePostDto,
@@ -56,6 +57,8 @@ export class PostsService {
     private readonly collectionRepository: Repository<Collection>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Follow)
+    private readonly followRepository: Repository<Follow>,
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
     private readonly dataSource: DataSource,
@@ -635,7 +638,8 @@ export class PostsService {
       });
 
       if (existingLike) {
-        throw new BadRequestException('Already liked');
+        // Already liked - return success instead of error to handle race conditions gracefully
+        return existingLike;
       }
 
       let post: Post | null = null;
@@ -689,15 +693,6 @@ export class PostsService {
         );
       }
 
-      this.loggingService.log('Post/Comment liked', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: {
-          likeId: savedLike.id,
-          postId: postId || null,
-          commentId: commentId || null,
-        },
-      });
 
       return savedLike;
     } catch (error) {
@@ -747,7 +742,8 @@ export class PostsService {
       });
 
       if (!like) {
-        throw new NotFoundException('Like not found');
+        // Already unliked - return success instead of error to handle race conditions gracefully
+        return; // Already unliked, nothing to do
       }
 
       await this.likeRepository.remove(like);
@@ -768,14 +764,6 @@ export class PostsService {
         );
       }
 
-      this.loggingService.log('Post/Comment unliked', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: {
-          postId: postId || null,
-          commentId: commentId || null,
-        },
-      });
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -801,6 +789,7 @@ export class PostsService {
 
   /**
    * Share a post
+   * Creates a new post in the user's feed that references the original post
    */
   async sharePost(
     userId: string,
@@ -808,11 +797,12 @@ export class PostsService {
     createShareDto: CreateShareDto,
   ): Promise<Share> {
     try {
-      const post = await this.postRepository.findOne({
+      const originalPost = await this.postRepository.findOne({
         where: { id: postId },
+        relations: ['user'],
       });
 
-      if (!post) {
+      if (!originalPost) {
         throw new NotFoundException('Post not found');
       }
 
@@ -839,29 +829,52 @@ export class PostsService {
         ? sanitizeText(createShareDto.comment)
         : null;
 
-      const share = this.shareRepository.create({
-        comment: sanitizedComment,
-        postId,
-        userId,
-        post,
-        user,
+      // Use transaction to ensure atomicity
+      const result = await this.dataSource.transaction(async (transactionalEntityManager) => {
+        // Check if user has already shared this post
+        const existingShare = await transactionalEntityManager.findOne(Share, {
+          where: { userId, postId },
+        });
+
+        if (existingShare) {
+          throw new BadRequestException('Post already shared');
+        }
+
+        // Create Share entity
+        const share = transactionalEntityManager.create(Share, {
+          comment: sanitizedComment,
+          postId,
+          userId,
+        });
+
+        const savedShare = await transactionalEntityManager.save(Share, share);
+
+        // Increment original post shares count atomically
+        await transactionalEntityManager.increment(
+          Post,
+          { id: postId },
+          'sharesCount',
+          1,
+        );
+
+        return { share: savedShare };
       });
 
-      const savedShare = await this.shareRepository.save(share);
-
-      // Increment post shares count atomically
-      await this.postRepository.increment({ id: postId }, 'sharesCount', 1);
-
       // Invalidate post cache
-      await this.cachingService.invalidateByTags('post', `post:${postId}`);
+      await this.cachingService.invalidateByTags(
+        'post',
+        `post:${postId}`,
+        `user:${userId}:posts`,
+        'feed',
+      );
 
       this.loggingService.log('Post shared', 'PostsService', {
         category: LogCategory.USER_MANAGEMENT,
         userId,
-        metadata: { shareId: savedShare.id, postId },
+        metadata: { shareId: result.share.id, postId },
       });
 
-      return savedShare;
+      return result.share;
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -1114,18 +1127,27 @@ export class PostsService {
       const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
       // Build query - show public posts or user's own posts (excluding drafts and archived unless viewing own)
+      // Include shared posts (posts with parentPostId) as they are posts created by the user
       const queryBuilder = this.postRepository
         .createQueryBuilder('post')
         .leftJoinAndSelect('post.user', 'user')
         .leftJoinAndSelect('user.profile', 'profile')
+        .leftJoinAndSelect('post.parentPost', 'parentPost')
+        .leftJoinAndSelect('parentPost.user', 'parentPostUser')
+        .leftJoinAndSelect('parentPostUser.profile', 'parentPostUserProfile')
         .where('post.userId = :targetUserId', { targetUserId })
-        .andWhere('post.parentPostId IS NULL') // Only top-level posts
         .andWhere(
-          '(post.isPublic = :isPublic OR post.userId = :currentUserId)',
-          {
-            isPublic: true,
-            currentUserId: currentUserId || '',
-          },
+          currentUserId
+            ? '(post.isPublic = :isPublic OR post.userId = :currentUserId)'
+            : 'post.isPublic = :isPublic',
+          currentUserId
+            ? {
+                isPublic: true,
+                currentUserId,
+              }
+            : {
+                isPublic: true,
+              },
         )
         .orderBy(`post.${safeSortBy}`, safeSortOrder)
         .skip(skip)
@@ -1192,6 +1214,129 @@ export class PostsService {
   }
 
   /**
+   * Get feed posts (posts from users the current user follows + shared posts)
+   */
+  async getFeed(
+    userId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<
+    PaginationResponse<Post & { isLiked: boolean } & Record<string, any>>
+  > {
+    try {
+      const page = paginationDto.page || 1;
+      const limit = paginationDto.limit || 10;
+      const sortBy = paginationDto.sortBy || 'dateCreated';
+      const sortOrder = paginationDto.sortOrder || 'DESC';
+      const skip = (page - 1) * limit;
+
+      const allowedSortFields = [
+        'dateCreated',
+        'likesCount',
+        'commentsCount',
+        'sharesCount',
+        'viewsCount',
+      ];
+      const safeSortBy = allowedSortFields.includes(sortBy)
+        ? sortBy
+        : 'dateCreated';
+      const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+      // Get list of user IDs that the current user follows
+      const follows = await this.followRepository.find({
+        where: { followerId: userId },
+        select: ['followingId'],
+      });
+
+      const followingUserIds = follows.map((f) => f.followingId);
+      
+      // Include the current user's own posts in the feed
+      const feedUserIds = [...followingUserIds, userId];
+
+      // Get post IDs that the user has shared
+      const sharedPosts = await this.shareRepository.find({
+        where: { userId },
+        select: ['postId'],
+      });
+      const sharedPostIds = sharedPosts.map((s) => s.postId);
+
+      // Build query to get posts from followed users + posts the user has shared
+      const queryBuilder = this.postRepository
+        .createQueryBuilder('post')
+        .leftJoinAndSelect('post.user', 'user')
+        .leftJoinAndSelect('user.profile', 'profile')
+        .where('post.isPublic = :isPublic', { isPublic: true })
+        .andWhere('post.isDraft = :isDraft', { isDraft: false })
+        .andWhere('post.isArchived = :isArchived', { isArchived: false })
+        .andWhere(
+          sharedPostIds.length > 0
+            ? '(post.userId IN (:...feedUserIds) OR post.id IN (:...sharedPostIds))'
+            : 'post.userId IN (:...feedUserIds)',
+          sharedPostIds.length > 0
+            ? { feedUserIds, sharedPostIds }
+            : { feedUserIds },
+        )
+        .orderBy(`post.${safeSortBy}`, safeSortOrder)
+        .skip(skip)
+        .take(limit);
+
+      const [posts, total] = await queryBuilder.getManyAndCount();
+
+      // Batch fetch all likes for the feed owner (userId)
+      let userLikes: Set<string> = new Set();
+      if (posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const likes = await this.likeRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userLikes = new Set(
+          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+        );
+      }
+
+      // Check which posts are liked by the feed owner (userId)
+      const postsWithLikes = posts.map((post) => ({
+        ...post,
+        isLiked: userLikes.has(post.id),
+      }));
+
+      const totalPages = Math.ceil(total / limit);
+      const meta: PaginationMeta = {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      };
+
+      return {
+        data: postsWithLikes as (Post & { isLiked: boolean } & Record<
+          string,
+          any
+        >)[],
+        meta,
+      };
+    } catch (error) {
+      this.loggingService.error(
+        'Error getting feed',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          userId,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+
+      throw new InternalServerErrorException('Failed to get feed');
+    }
+  }
+
+  /**
    * Get comments for a post
    */
   async findCommentsByPostId(
@@ -1235,14 +1380,42 @@ export class PostsService {
 
       const [comments, total] = await queryBuilder.getManyAndCount();
 
+      // Fetch replies for all top-level comments using query builder for proper serialization
+      const commentIds = comments.map((c) => c.id);
+      let replies: Comment[] = [];
+      if (commentIds.length > 0) {
+        const repliesQueryBuilder = this.commentRepository
+          .createQueryBuilder('reply')
+          .leftJoinAndSelect('reply.user', 'replyUser')
+          .leftJoinAndSelect('replyUser.profile', 'replyProfile')
+          .where('reply.postId = :postId', { postId })
+          .andWhere('reply.parentCommentId IS NOT NULL') // Only replies, not top-level comments
+          .andWhere('reply.parentCommentId IN (:...commentIds)', { commentIds })
+          .orderBy('reply.dateCreated', 'ASC');
+
+        replies = await repliesQueryBuilder.getMany();
+      }
+
+      // Group replies by parent comment
+      const repliesByParent = new Map<string, Comment[]>();
+      replies.forEach((reply) => {
+        if (reply.parentCommentId) {
+          const parentReplies = repliesByParent.get(reply.parentCommentId) || [];
+          parentReplies.push(reply);
+          repliesByParent.set(reply.parentCommentId, parentReplies);
+        }
+      });
+
+      // Get all comment IDs (including replies) for like checking
+      const allCommentIds = [...commentIds, ...replies.map((r) => r.id)];
+
       // Batch fetch all likes for the user if authenticated
       let userLikes: Set<string> = new Set();
-      if (userId && comments.length > 0) {
-        const commentIds = comments.map((c) => c.id);
+      if (userId && allCommentIds.length > 0) {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            commentId: In(commentIds),
+            commentId: In(allCommentIds),
           },
           select: ['commentId'],
         });
@@ -1251,11 +1424,77 @@ export class PostsService {
         );
       }
 
-      // Check which comments are liked by the user
-      const commentsWithLikes = comments.map((comment) => ({
-        ...comment,
-        isLiked: userId ? userLikes.has(comment.id) : false,
-      }));
+      // Attach replies and isLiked to each comment
+      // Properly serialize comments and replies with user data
+      const commentsWithLikes = comments.map((comment) => {
+        const commentReplies = repliesByParent.get(comment.id) || [];
+        return {
+          id: comment.id,
+          content: comment.content,
+          isEdited: comment.isEdited,
+          likesCount: comment.likesCount,
+          repliesCount: comment.repliesCount,
+          postId: comment.postId,
+          userId: comment.userId,
+          parentCommentId: comment.parentCommentId,
+          dateCreated: comment.dateCreated instanceof Date 
+            ? comment.dateCreated.toISOString() 
+            : comment.dateCreated,
+          dateUpdated: comment.dateUpdated instanceof Date 
+            ? comment.dateUpdated.toISOString() 
+            : comment.dateUpdated,
+          dateDeleted: comment.dateDeleted instanceof Date 
+            ? comment.dateDeleted.toISOString() 
+            : comment.dateDeleted || null,
+          user: comment.user
+            ? {
+                id: comment.user.id,
+                username: comment.user.username,
+                displayName: comment.user.displayName || comment.user.username,
+                profile: comment.user.profile
+                  ? {
+                      avatar: comment.user.profile.avatar,
+                    }
+                  : undefined,
+              }
+            : undefined,
+          isLiked: userId ? userLikes.has(comment.id) : false,
+          parentComment: null, // Explicitly set to null for top-level comments
+          replies: commentReplies.map((reply) => ({
+            id: reply.id,
+            content: reply.content,
+            isEdited: reply.isEdited,
+            likesCount: reply.likesCount,
+            repliesCount: reply.repliesCount,
+            postId: reply.postId,
+            userId: reply.userId,
+            parentCommentId: reply.parentCommentId,
+            dateCreated: reply.dateCreated instanceof Date 
+              ? reply.dateCreated.toISOString() 
+              : reply.dateCreated,
+            dateUpdated: reply.dateUpdated instanceof Date 
+              ? reply.dateUpdated.toISOString() 
+              : reply.dateUpdated,
+            dateDeleted: reply.dateDeleted instanceof Date 
+              ? reply.dateDeleted.toISOString() 
+              : reply.dateDeleted || null,
+            user: reply.user
+              ? {
+                  id: reply.user.id,
+                  username: reply.user.username,
+                  displayName: reply.user.displayName || reply.user.username,
+                  profile: reply.user.profile
+                    ? {
+                        avatar: reply.user.profile.avatar,
+                      }
+                    : undefined,
+                }
+              : undefined,
+            isLiked: userId ? userLikes.has(reply.id) : false,
+            replies: [], // Replies don't have nested replies
+          })),
+        };
+      });
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -1268,10 +1507,7 @@ export class PostsService {
       };
 
       return {
-        data: commentsWithLikes as (Comment & { isLiked: boolean } & Record<
-            string,
-            any
-          >)[],
+        data: commentsWithLikes as any, // Custom serialized object with replies included
         meta,
       };
     } catch (error) {
@@ -1580,7 +1816,6 @@ export class PostsService {
     try {
       const post = await this.postRepository.findOne({
         where: { id: postId },
-        relations: ['user'],
       });
 
       if (!post) {
@@ -1591,7 +1826,10 @@ export class PostsService {
         throw new ForbiddenException('You can only delete your own posts');
       }
 
-      await this.postRepository.remove(post);
+      // Delete the post
+      // TypeORM will automatically handle the ManyToMany join table cleanup
+      // CASCADE will handle related entities (comments, likes, shares, bookmarks, etc.)
+      await this.postRepository.delete({ id: postId });
 
       // Invalidate post cache
       await this.cachingService.invalidateByTags(
@@ -1684,6 +1922,7 @@ export class PostsService {
 
   /**
    * Delete a comment
+   * If it's a parent comment, also deletes all its replies (cascade delete)
    */
   async deleteComment(userId: string, commentId: string): Promise<void> {
     try {
@@ -1702,19 +1941,52 @@ export class PostsService {
 
       const postId = comment.postId;
       const parentCommentId = comment.parentCommentId;
+      const repliesCount = comment.repliesCount || 0;
 
-      await this.commentRepository.remove(comment);
+      // Use transaction to ensure atomicity
+      await this.dataSource.transaction(async (transactionalEntityManager) => {
+        // If this is a parent comment with replies, delete all replies first
+        if (repliesCount > 0) {
+          const replies = await transactionalEntityManager.find(Comment, {
+            where: { parentCommentId: commentId },
+          });
 
-      // Decrement counts atomically
-      if (parentCommentId) {
-        await this.commentRepository.decrement(
-          { id: parentCommentId },
-          'repliesCount',
+          if (replies.length > 0) {
+            // Delete all replies
+            await transactionalEntityManager.remove(Comment, replies);
+
+            // Decrement post comments count by number of replies deleted
+            await transactionalEntityManager.decrement(
+              Post,
+              { id: postId },
+              'commentsCount',
+              replies.length,
+            );
+          }
+        }
+
+        // Delete the comment itself
+        await transactionalEntityManager.remove(Comment, comment);
+
+        // Decrement counts atomically
+        if (parentCommentId) {
+          // This is a reply, decrement parent's repliesCount
+          await transactionalEntityManager.decrement(
+            Comment,
+            { id: parentCommentId },
+            'repliesCount',
+            1,
+          );
+        }
+
+        // Decrement post comments count (1 for the comment itself, replies already handled above)
+        await transactionalEntityManager.decrement(
+          Post,
+          { id: postId },
+          'commentsCount',
           1,
         );
-      }
-
-      await this.postRepository.decrement({ id: postId }, 'commentsCount', 1);
+      });
 
       // Invalidate comment and post cache
       await this.cachingService.invalidateByTags(
@@ -1727,7 +1999,7 @@ export class PostsService {
       this.loggingService.log('Comment deleted', 'PostsService', {
         category: LogCategory.USER_MANAGEMENT,
         userId,
-        metadata: { commentId },
+        metadata: { commentId, repliesDeleted: repliesCount },
       });
     } catch (error) {
       if (
@@ -1948,6 +2220,144 @@ export class PostsService {
     }
   }
 
+  /**
+   * Get user's liked posts
+   */
+  async getLikedPosts(
+    userId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginationResponse<Post & { isLiked: boolean } & Record<string, any>>> {
+    try {
+      const page = paginationDto.page || 1;
+      const limit = paginationDto.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.likeRepository
+        .createQueryBuilder('like')
+        .leftJoinAndSelect('like.post', 'post')
+        .leftJoinAndSelect('post.user', 'user')
+        .leftJoinAndSelect('user.profile', 'profile')
+        .where('like.userId = :userId', { userId })
+        .andWhere('like.postId IS NOT NULL') // Only get post likes, not comment likes
+        .orderBy('like.dateCreated', 'DESC')
+        .skip(skip)
+        .take(limit);
+
+      const [likes, total] = await queryBuilder.getManyAndCount();
+      const posts = likes.map((l) => l.post).filter((p): p is Post => p !== null);
+
+      // All posts in this list are liked by the user
+      const postsWithLikes = posts.map((post) => ({
+        ...post,
+        isLiked: true,
+      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+
+      const totalPages = Math.ceil(total / limit);
+      const meta: PaginationMeta = {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      };
+
+      return {
+        data: postsWithLikes,
+        meta,
+      };
+    } catch (error) {
+      this.loggingService.error(
+        'Error getting liked posts',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          userId,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+
+      throw new InternalServerErrorException('Failed to get liked posts');
+    }
+  }
+
+  /**
+   * Get posts shared by a user
+   */
+  async getSharedPosts(
+    userId: string,
+    paginationDto: PaginationDto = {},
+  ): Promise<PaginationResponse<Post & { isLiked: boolean } & Record<string, any>>> {
+    try {
+      const page = paginationDto.page || 1;
+      const limit = paginationDto.limit || 10;
+      const skip = (page - 1) * limit;
+
+      const queryBuilder = this.shareRepository
+        .createQueryBuilder('share')
+        .leftJoinAndSelect('share.post', 'post')
+        .leftJoinAndSelect('post.user', 'user')
+        .leftJoinAndSelect('user.profile', 'profile')
+        .where('share.userId = :userId', { userId })
+        .orderBy('share.dateCreated', 'DESC')
+        .skip(skip)
+        .take(limit);
+
+      const [shares, total] = await queryBuilder.getManyAndCount();
+      const posts = shares.map((s) => s.post).filter((p): p is Post => p !== null);
+
+      // Batch fetch likes
+      let userLikes: Set<string> = new Set();
+      if (posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const likes = await this.likeRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userLikes = new Set(
+          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+        );
+      }
+
+      const postsWithLikes = posts.map((post) => ({
+        ...post,
+        isLiked: userLikes.has(post.id),
+      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+
+      const totalPages = Math.ceil(total / limit);
+      const meta: PaginationMeta = {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      };
+
+      return {
+        data: postsWithLikes,
+        meta,
+      };
+    } catch (error) {
+      this.loggingService.error(
+        'Error getting shared posts',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          userId,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+
+      throw new InternalServerErrorException('Failed to get shared posts');
+    }
+  }
+
   // #########################################################
   // VIEW TRACKING
   // #########################################################
@@ -1975,12 +2385,6 @@ export class PostsService {
 
       // Invalidate cache
       await this.cachingService.invalidateByTags('post', `post:${postId}`);
-
-      this.loggingService.log('Post view tracked', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId: userId || 'anonymous',
-        metadata: { postId },
-      });
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;

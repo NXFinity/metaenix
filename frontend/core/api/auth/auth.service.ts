@@ -18,8 +18,8 @@ import type {
   VerifyLogin2faRequest,
   VerifyLogin2faResponse,
   LogoutResponse,
-  User,
 } from './type/auth.type';
+import type { User } from '@/core/api/user';
 
 /**
  * Authentication Service

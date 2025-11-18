@@ -12,8 +12,72 @@ import type {
   ForgotPasswordRequest,
   ResetPasswordRequest,
   VerifyLogin2faRequest,
-  User,
 } from '@/core/api/auth';
+import type { User } from '@/core/api/user';
+
+/**
+ * Auth Hook Return Type
+ */
+export interface UseAuthReturn {
+  // User state
+  user: User | null;
+  isAuthenticated: boolean;
+  isInitializing: boolean;
+  isLoadingUser: boolean;
+  userError: Error | null;
+
+  // Auth actions
+  register: (data: RegisterRequest) => void;
+  registerAsync: (data: RegisterRequest) => Promise<any>;
+  isRegistering: boolean;
+  registerError: Error | null;
+
+  login: (data: LoginRequest) => void;
+  loginAsync: (data: LoginRequest) => Promise<any>;
+  isLoggingIn: boolean;
+  loginError: Error | null;
+  requiresTwoFactor: boolean;
+
+  verifyLogin2fa: (data: { email: string; code: string }) => void;
+  verifyLogin2faAsync: (data: { email: string; code: string }) => Promise<any>;
+  isVerifying2fa: boolean;
+  verify2faError: Error | null;
+
+  logout: () => void;
+  logoutAsync: () => Promise<any>;
+  isLoggingOut: boolean;
+
+  // Email verification
+  verifyEmail: (data: VerifyEmailRequest) => void;
+  verifyEmailAsync: (data: VerifyEmailRequest) => Promise<any>;
+  isVerifyingEmail: boolean;
+  verifyEmailError: Error | null;
+
+  resendVerifyEmail: (data: ResendVerifyEmailRequest) => void;
+  resendVerifyEmailAsync: (data: ResendVerifyEmailRequest) => Promise<any>;
+  isResendingVerifyEmail: boolean;
+  resendVerifyEmailError: Error | null;
+
+  // Password management
+  changePassword: (data: ChangePasswordRequest) => void;
+  changePasswordAsync: (data: ChangePasswordRequest) => Promise<any>;
+  isChangingPassword: boolean;
+  changePasswordError: Error | null;
+
+  forgotPassword: (data: ForgotPasswordRequest) => void;
+  forgotPasswordAsync: (data: ForgotPasswordRequest) => Promise<any>;
+  isSendingForgotPassword: boolean;
+  forgotPasswordError: Error | null;
+
+  resetPassword: (data: ResetPasswordRequest) => void;
+  resetPasswordAsync: (data: ResetPasswordRequest) => Promise<any>;
+  isResettingPassword: boolean;
+  resetPasswordError: Error | null;
+
+  // Utility functions
+  initializeAuth: () => Promise<void>;
+  refetchUser: () => Promise<any>;
+}
 
 /**
  * Auth Hook
@@ -29,7 +93,7 @@ import type {
  * - 2FA support
  * - Automatic store synchronization
  */
-export const useAuth = () => {
+export const useAuth = (): UseAuthReturn => {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, setUser, logout: logoutStore } = useAuthStore();
@@ -238,12 +302,23 @@ export const useAuth = () => {
   // Mutation: Verify Email
   const verifyEmailMutation = useMutation({
     mutationFn: (data: VerifyEmailRequest) => authService.verifyEmail(data),
-    onSuccess: (response) => {
-      if (response.user) {
-        setUser(response.user);
-        queryClient.setQueryData(['auth', 'me'], response.user);
-      }
+    onSuccess: async (response) => {
+      // Invalidate and refetch full user data to get updated security status
+      queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
       queryClient.invalidateQueries({ queryKey: ['auth'] });
+      
+      // Refetch full user data with all relations (profile, privacy, security)
+      try {
+        const fullUser = await authService.getMe();
+        setUser(fullUser);
+        queryClient.setQueryData(['auth', 'me'], fullUser);
+      } catch (error) {
+        // If getMe fails, use the partial user from verification response
+        if (response.user) {
+          setUser(response.user);
+          queryClient.setQueryData(['auth', 'me'], response.user);
+        }
+      }
     },
   });
 

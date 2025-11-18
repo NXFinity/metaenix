@@ -30,6 +30,18 @@ export const POSTS_ENDPOINTS = {
   GET_BY_USER: (userId: string) => `/posts/user/${userId}`,
 
   /**
+   * Get feed posts for a specific user (posts from users they follow + shared posts)
+   * GET /posts/user/:userId/feed?page=1&limit=20
+   */
+  GET_USER_FEED: (userId: string) => `/posts/user/${userId}/feed`,
+
+  /**
+   * Get feed posts (posts from followed users + shared posts)
+   * GET /posts/feed
+   */
+  GET_FEED: () => `/posts/feed`,
+
+  /**
    * Get a single post by ID
    * GET /posts/:postId
    */
@@ -106,6 +118,18 @@ export const POSTS_ENDPOINTS = {
    * GET /posts/bookmarks?page=1&limit=20
    */
   GET_BOOKMARKS: '/posts/bookmarks',
+
+  /**
+   * Get user's liked posts
+   * GET /posts/likes?page=1&limit=20
+   */
+  GET_LIKES: '/posts/likes',
+
+  /**
+   * Get user's shared posts
+   * GET /posts/shares?page=1&limit=20
+   */
+  GET_SHARES: '/posts/shares',
 
   /**
    * Report a post

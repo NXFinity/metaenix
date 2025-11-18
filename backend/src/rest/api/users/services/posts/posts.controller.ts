@@ -11,6 +11,7 @@ import {
   BadRequestException,
   UseInterceptors,
   UploadedFiles,
+  Req,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { PostsService } from './posts.service';
@@ -220,12 +221,13 @@ export class PostsController {
   @ApiResponse({ status: 400, description: 'Already liked' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Post not found' })
-  likePost(@CurrentUser() user: User, @Param('postId') postId: string) {
+  async likePost(@CurrentUser() user: User, @Param('postId') postId: string) {
     const userId = user?.id;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.likePostOrComment(userId, postId);
+    await this.postsService.likePostOrComment(userId, postId);
+    return { message: 'Post liked successfully', liked: true };
   }
 
   @Delete(':postId/like')
@@ -238,12 +240,13 @@ export class PostsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Like not found' })
-  unlikePost(@CurrentUser() user: User, @Param('postId') postId: string) {
+  async unlikePost(@CurrentUser() user: User, @Param('postId') postId: string) {
     const userId = user?.id;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.unlikePostOrComment(userId, postId);
+    await this.postsService.unlikePostOrComment(userId, postId);
+    return { message: 'Post unliked successfully', liked: false };
   }
 
   @Post(':postId/share')
@@ -291,9 +294,49 @@ export class PostsController {
     return this.postsService.findAll(paginationDto, userId);
   }
 
-  @Get('user/:userId')
+  @Get('feed')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get feed posts (posts from followed users + shared posts)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiResponse({
+    status: 200,
+    description: 'Feed posts retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getFeed(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getFeed(userId, paginationDto);
+  }
+
+  @Get('user/:userId/feed')
   @Public()
-  @RequireScope('read:posts') // Required for OAuth tokens accessing private posts
+  @ApiOperation({ summary: 'Get feed posts for a specific user (posts from users they follow + shared posts)' })
+  @ApiParam({ name: 'userId', description: 'User ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiResponse({
+    status: 200,
+    description: 'User feed retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  getUserFeed(
+    @Param('userId') targetUserId: string,
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: User,
+  ) {
+    return this.postsService.getFeed(targetUserId, paginationDto);
+  }
+
+  @Get('user/:userId')
+  @RequireScope('read:posts')
   @ApiOperation({ summary: 'Get posts by user ID' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -304,14 +347,167 @@ export class PostsController {
     status: 200,
     description: 'User posts retrieved successfully',
   })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   findByUserId(
     @Param('userId') targetUserId: string,
     @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: any,
+    @CurrentUser() user: User,
   ) {
     const userId = user?.id;
     return this.postsService.findByUserId(targetUserId, paginationDto, userId);
+  }
+
+  @Get('bookmarks')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get user\'s bookmarked posts' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Bookmarked posts retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getBookmarkedPosts(
+    @CurrentUser() user: User,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getBookmarkedPosts(userId, paginationDto);
+  }
+
+  @Get('likes')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get user\'s liked posts' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Liked posts retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getLikedPosts(
+    @CurrentUser() user: User,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getLikedPosts(userId, paginationDto);
+  }
+
+  @Get('shares')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get user\'s shared posts' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Shared posts retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getSharedPosts(
+    @CurrentUser() user: User,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getSharedPosts(userId, paginationDto);
+  }
+
+  @Get('search')
+  @Public()
+  @RequireScope('read:posts') // Required for OAuth tokens searching posts
+  @ApiOperation({ summary: 'Search posts by content, hashtags, or mentions' })
+  @ApiQuery({ name: 'q', description: 'Search query', required: true })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Search results retrieved successfully',
+  })
+  searchPosts(
+    @Query('q') query: string,
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: any,
+  ) {
+    const userId = user?.id;
+    if (!query || query.trim().length === 0) {
+      throw new BadRequestException('Search query is required');
+    }
+    return this.postsService.searchPosts(query, paginationDto, userId);
+  }
+
+  @Get('filter/:type')
+  @Public()
+  @RequireScope('read:posts') // Required for OAuth tokens filtering posts
+  @ApiOperation({ summary: 'Filter posts by type' })
+  @ApiParam({
+    name: 'type',
+    description: 'Post type',
+    enum: ['text', 'image', 'video', 'document', 'mixed'],
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiResponse({
+    status: 200,
+    description: 'Filtered posts retrieved successfully',
+  })
+  filterPostsByType(
+    @Param('type') type: 'text' | 'image' | 'video' | 'document' | 'mixed',
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: any,
+  ) {
+    const userId = user?.id;
+    return this.postsService.filterPostsByType(type, paginationDto, userId);
+  }
+
+  @Get('collections/:collectionId/posts')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get posts from a collection with pagination' })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['dateCreated', 'likesCount', 'commentsCount', 'viewsCount'],
+    example: 'dateCreated',
+  })
+  @ApiQuery({
+    name: 'sortOrder',
+    required: false,
+    enum: ['ASC', 'DESC'],
+    example: 'DESC',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Collection posts retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Collection not found' })
+  getCollectionPosts(
+    @Param('collectionId') collectionId: string,
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: any,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getCollectionPosts(
+      collectionId,
+      userId,
+      paginationDto,
+    );
   }
 
   @Get(':postId')
@@ -330,8 +526,7 @@ export class PostsController {
   }
 
   @Get(':postId/comments')
-  @Public()
-  @RequireScope('read:comments') // Required for OAuth tokens accessing comments
+  @RequireScope('read:comments')
   @ApiOperation({ summary: 'Get comments for a post' })
   @ApiParam({ name: 'postId', description: 'Post ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -357,8 +552,7 @@ export class PostsController {
   }
 
   @Get('comments/:commentId/replies')
-  @Public()
-  @RequireScope('read:comments') // Required for OAuth tokens accessing replies
+  @RequireScope('read:comments')
   @ApiOperation({ summary: 'Get replies to a comment' })
   @ApiParam({ name: 'commentId', description: 'Comment ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -601,79 +795,6 @@ export class PostsController {
     return this.postsService.unbookmarkPost(userId, postId);
   }
 
-  @Get('bookmarks')
-  @RequireScope('read:posts')
-  @ApiOperation({ summary: 'Get user\'s bookmarked posts' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiResponse({
-    status: 200,
-    description: 'Bookmarked posts retrieved successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  getBookmarkedPosts(
-    @CurrentUser() user: User,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.postsService.getBookmarkedPosts(userId, paginationDto);
-  }
-
-  // #########################################################
-  // SEARCH & FILTER OPTIONS
-  // #########################################################
-
-  @Get('search')
-  @Public()
-  @RequireScope('read:posts') // Required for OAuth tokens searching posts
-  @ApiOperation({ summary: 'Search posts by content, hashtags, or mentions' })
-  @ApiQuery({ name: 'q', description: 'Search query', required: true })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiResponse({
-    status: 200,
-    description: 'Search results retrieved successfully',
-  })
-  searchPosts(
-    @Query('q') query: string,
-    @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: any,
-  ) {
-    const userId = user?.id;
-    if (!query || query.trim().length === 0) {
-      throw new BadRequestException('Search query is required');
-    }
-    return this.postsService.searchPosts(query, paginationDto, userId);
-  }
-
-  @Get('filter/:type')
-  @Public()
-  @RequireScope('read:posts') // Required for OAuth tokens filtering posts
-  @ApiOperation({ summary: 'Filter posts by type' })
-  @ApiParam({
-    name: 'type',
-    description: 'Post type',
-    enum: ['text', 'image', 'video', 'document', 'mixed'],
-  })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'sortBy', required: false, type: String })
-  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
-  @ApiResponse({
-    status: 200,
-    description: 'Filtered posts retrieved successfully',
-  })
-  filterPostsByType(
-    @Param('type') type: 'text' | 'image' | 'video' | 'document' | 'mixed',
-    @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: any,
-  ) {
-    const userId = user?.id;
-    return this.postsService.filterPostsByType(type, paginationDto, userId);
-  }
 
   // #########################################################
   // REPORT OPTIONS
@@ -889,41 +1010,6 @@ export class PostsController {
     );
   }
 
-  @Get('collections/:collectionId/posts')
-  @RequireScope('read:posts')
-  @ApiOperation({ summary: 'Get posts from a collection with pagination' })
-  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  @ApiQuery({
-    name: 'sortBy',
-    required: false,
-    enum: ['dateCreated', 'likesCount', 'commentsCount', 'viewsCount'],
-    example: 'dateCreated',
-  })
-  @ApiQuery({
-    name: 'sortOrder',
-    required: false,
-    enum: ['ASC', 'DESC'],
-    example: 'DESC',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Collection posts retrieved successfully',
-  })
-  @ApiResponse({ status: 403, description: 'Forbidden - Collection is private' })
-  @ApiResponse({ status: 404, description: 'Collection not found' })
-  getCollectionPosts(
-    @CurrentUser() user: User,
-    @Param('collectionId') collectionId: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.postsService.getCollectionPosts(collectionId, userId, paginationDto);
-  }
 
   // #########################################################
   // ARCHIVE OPTIONS

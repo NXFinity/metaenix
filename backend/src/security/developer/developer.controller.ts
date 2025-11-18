@@ -26,13 +26,14 @@ import {
   UpdateApplicationDto,
 } from './assets/dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { CurrentUser } from '../auth/decorators/currentUser.decorator';
 import { User } from '../../rest/api/users/assets/entities/user.entity';
 import { Application } from './assets/entities/application.entity';
 
 @ApiTags('Developer Management')
 @Controller('developer')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AdminGuard)
 @ApiBearerAuth()
 export class DeveloperController {
   constructor(private readonly developerService: DeveloperService) {}

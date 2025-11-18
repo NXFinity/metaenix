@@ -34,5 +34,11 @@ export const USER_ENDPOINTS = {
    * DELETE /users/me
    */
   DELETE_ME: '/users/me',
+
+  /**
+   * Get all users with pagination
+   * GET /users?page=1&limit=20
+   */
+  GET_ALL: '/users',
 } as const;
 

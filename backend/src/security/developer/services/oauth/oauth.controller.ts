@@ -23,22 +23,23 @@ import {
   IntrospectDto,
 } from '../../assets/dto';
 import { AuthGuard } from '../../../auth/guards/auth.guard';
+import { AdminGuard } from '../../../auth/guards/admin.guard';
 import { CurrentUser } from '../../../auth/decorators/currentUser.decorator';
 import { User } from '../../../../rest/api/users/assets/entities/user.entity';
 import { Public } from '../../../auth/decorators/public.decorator';
 
 @ApiTags('OAuth')
 @Controller('oauth')
+@UseGuards(AuthGuard, AdminGuard)
 export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
 
   /**
    * Authorization endpoint
    * GET /oauth/authorize
-   * Requires user authentication
+   * Requires user authentication and Administrator role
    */
   @Get('authorize')
-  @UseGuards(AuthGuard)
   @ApiOperation({
     summary: 'OAuth 2.0 Authorization Endpoint',
     description:

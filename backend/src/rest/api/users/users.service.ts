@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CreateUserDto, UpdateUserDto } from './assets/dto/createUser.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './assets/entities/user.entity';
@@ -14,6 +15,7 @@ import { Profile } from './assets/entities/profile.entity';
 import { Privacy } from './assets/entities/security/privacy.entity';
 import { ROLE } from '../../../security/roles';
 import { Security } from './assets/entities/security/security.entity';
+import { Follow } from './services/follows/assets/entities/follow.entity';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 import {
   PaginationResponse,
@@ -22,6 +24,7 @@ import {
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { CachingService } from '@caching/caching';
+import { FollowsService } from './services/follows/follows.service';
 
 @Injectable()
 export class UsersService {
@@ -35,6 +38,8 @@ export class UsersService {
     private readonly securityRepository: Repository<Security>,
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
+    private readonly configService: ConfigService,
+    private readonly followsService: FollowsService,
   ) {}
 
   // #########################################################
@@ -120,19 +125,24 @@ export class UsersService {
         : 'dateCreated';
       const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
-      // Build base query for counting - only count public users
+      // Get system admin username to exclude from public view
+      const systemUsername = this.configService.get<string>('SYSTEM_USERNAME') || 'systemadmin';
+
+      // Build base query for counting - only count public users, exclude systemadmin
       const countQueryBuilder = this.userRepository
         .createQueryBuilder('user')
-        .where('user.isPublic = :isPublic', { isPublic: true });
+        .where('user.isPublic = :isPublic', { isPublic: true })
+        .andWhere('user.username != :systemUsername', { systemUsername });
 
       // Get total count (before pagination)
       const total = await countQueryBuilder.getCount();
 
-      // Build query for paginated results - only select safe fields
+      // Build query for paginated results - only select safe fields, exclude systemadmin
       const queryBuilder = this.userRepository
         .createQueryBuilder('user')
         .leftJoinAndSelect('user.profile', 'profile')
         .where('user.isPublic = :isPublic', { isPublic: true })
+        .andWhere('user.username != :systemUsername', { systemUsername })
         .orderBy(`user.${safeSortBy}`, safeSortOrder)
         .select([
           'user.id',
@@ -223,37 +233,114 @@ export class UsersService {
     }
   }
 
-  // Find by Username
-  async findByUsername(username: string): Promise<User> {
+  // Find by Username (case-insensitive)
+  async findByUsername(username: string, currentUserId?: string): Promise<User> {
     try {
-      return await this.cachingService.getOrSetUser(
+      // Normalize username to lowercase for cache key, but preserve original for query
+      const normalizedUsername = username.toLowerCase();
+
+      // First, quickly check if user exists and get privacy settings (lightweight query)
+      const userCheck = await this.userRepository
+        .createQueryBuilder('user')
+        .leftJoinAndSelect('user.privacy', 'privacy')
+        .where('LOWER(user.username) = LOWER(:username)', { username })
+        .select([
+          'user.id',
+          'user.username',
+          'user.displayName',
+          'user.isPublic',
+          'privacy.id',
+          'privacy.isFollowerOnly',
+        ])
+        .getOne();
+
+      if (!userCheck) {
+        throw new NotFoundException(
+          `User with username ${username} not found`,
+        );
+      }
+
+      // Check privacy settings early (before expensive queries)
+      const isPrivate = userCheck.isPublic === false || userCheck.privacy?.isFollowerOnly === true;
+      
+      if (isPrivate) {
+        // If viewing own profile, allow access
+        if (currentUserId && currentUserId === userCheck.id) {
+          // Continue to full user fetch
+        } else {
+          // Private profiles are only accessible to friends (not yet implemented)
+          // For now, only the owner can view their own private profile
+          throw new ForbiddenException('This profile is private. Only friends can view private profiles.');
+        }
+      }
+
+      // Now fetch full user data (only if privacy check passed)
+      const user = await this.cachingService.getOrSetUser(
         'username',
-        username,
+        normalizedUsername,
         async () => {
-          const user = await this.userRepository
+          const foundUser = await this.userRepository
             .createQueryBuilder('user')
             .leftJoinAndSelect('user.profile', 'profile')
-            .where('user.username = :username', { username })
+            .leftJoinAndSelect('user.privacy', 'privacy')
+            .where('LOWER(user.username) = LOWER(:username)', { username })
             .select([
               'user.id',
               'user.username',
+              'user.displayName',
               'user.email',
               'user.isPublic',
+              'user.followersCount',
+              'user.followingCount',
+              'user.isDeveloper',
+              'user.developerTermsAcceptedAt',
+              'user.dateCreated',
+              'user.dateUpdated',
               'profile.id',
+              'profile.firstName',
+              'profile.lastName',
+              'profile.bio',
+              'profile.location',
+              'profile.website',
+              'profile.avatar',
+              'profile.cover',
+              'profile.banner',
+              'profile.offline',
+              'profile.dateOfBirth',
+              'privacy.id',
+              'privacy.isFollowerOnly',
             ])
             .getOne();
 
-          if (!user) {
+          if (!foundUser) {
             throw new NotFoundException(
               `User with username ${username} not found`,
             );
           }
 
-          return user;
+          // Calculate actual counts from Follow table to ensure accuracy
+          const followRepository = this.userRepository.manager.getRepository(Follow);
+          const [actualFollowersCount, actualFollowingCount] = await Promise.all([
+            followRepository.count({
+              where: { followingId: foundUser.id },
+            }),
+            followRepository.count({
+              where: { followerId: foundUser.id },
+            }),
+          ]);
+
+          // Update the user object with actual counts
+          return {
+            ...foundUser,
+            followersCount: actualFollowersCount,
+            followingCount: actualFollowingCount,
+          };
         },
       );
+
+      return user;
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
         throw error;
       }
       this.loggingService.error(
@@ -402,30 +489,114 @@ export class UsersService {
 
   async getMe(userId: string): Promise<User> {
     try {
+      const fetchUserData = async () => {
+        const userData = await this.userRepository
+          .createQueryBuilder('user')
+          .leftJoinAndSelect('user.profile', 'profile')
+          .leftJoinAndSelect('user.privacy', 'privacy')
+          .leftJoinAndSelect('user.security', 'security')
+          .where('user.id = :id', { id: userId })
+          .select([
+            'user.id',
+            'user.username',
+            'user.displayName',
+            'user.email',
+            'user.isPublic',
+            'user.followersCount',
+            'user.followingCount',
+            'user.isDeveloper',
+            'user.developerTermsAcceptedAt',
+            'user.dateCreated',
+            'user.dateUpdated',
+            'user.websocketId',
+            'user.role',
+            'profile.id',
+            'profile.firstName',
+            'profile.lastName',
+            'profile.bio',
+            'profile.location',
+            'profile.website',
+            'profile.avatar',
+            'profile.cover',
+            'profile.banner',
+            'profile.offline',
+            'profile.dateOfBirth',
+            'privacy.id',
+            'privacy.isFollowerOnly',
+            'privacy.isSubscriberOnly',
+            'privacy.isMatureContent',
+            'privacy.allowMessages',
+            'privacy.allowNotifications',
+            'privacy.allowFriendRequests',
+            'privacy.notifyOnFollow',
+            'security.id',
+            'security.isVerified',
+            'security.dateVerified',
+            'security.isTwoFactorEnabled',
+            'security.twoFactorEnabledAt',
+            'security.twoFactorLastVerified',
+            'security.isBanned',
+            'security.banReason',
+            'security.bannedUntil',
+            'security.bannedAt',
+            'security.isTimedOut',
+            'security.timeoutReason',
+            'security.timedOutUntil',
+            'security.isAgedVerified',
+            'security.agedVerifiedDate',
+          ])
+          .getOne();
+
+        if (!userData) {
+          throw new NotFoundException(`User with id ${userId} not found`);
+        }
+
+        // Remove password and sensitive security fields from response
+        const { password, ...userWithoutPassword } = userData;
+        
+        // Remove sensitive security fields if security exists
+        if (userWithoutPassword.security) {
+          const {
+            twoFactorSecret,
+            twoFactorBackupCodes,
+            refreshToken,
+            passwordResetToken,
+            passwordResetTokenExpires,
+            verificationToken,
+            twoFactorToken,
+            ...safeSecurity
+          } = userWithoutPassword.security;
+          userWithoutPassword.security = safeSecurity as any;
+        }
+
+        return userWithoutPassword as User;
+      };
+
+      // Try to get from cache first
       const user = await this.cachingService.getOrSetUser(
         'id',
         userId,
-        async () => {
-          const userData = await this.userRepository
-            .createQueryBuilder('user')
-            .leftJoinAndSelect('user.profile', 'profile')
-            .leftJoinAndSelect('user.privacy', 'privacy')
-            .leftJoinAndSelect('user.security', 'security')
-            .where('user.id = :id', { id: userId })
-            .getOne();
-
-          if (!userData) {
-            throw new NotFoundException(`User with id ${userId} not found`);
-          }
-
-          // Remove password from response
-          const { password, ...userWithoutPassword } = userData;
-          return userWithoutPassword as User;
-        },
+        fetchUserData,
         {
           tags: ['user', `user:${userId}`, 'user:me'],
         },
       );
+
+      // Check if relations are missing or role is missing (stale cache) and reload if needed
+      if (!user.security || !user.privacy || !user.role) {
+        // Cache returned incomplete data, invalidate and fetch fresh from DB
+        await this.cachingService.invalidateUser(userId);
+        
+        // Fetch fresh data from database
+        const freshUserData = await fetchUserData();
+
+        // Update cache with fresh data
+        await this.cachingService.cacheUser(userId, freshUserData, {
+          tags: ['user', `user:${userId}`, 'user:me'],
+        });
+
+        return freshUserData;
+      }
 
       return user;
     } catch (error) {

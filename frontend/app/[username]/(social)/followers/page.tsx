@@ -1,6 +1,5 @@
 'use client';
 
-import { MainLayout } from '@/theme/layout/MainLayout';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -73,31 +72,26 @@ export default function FollowersPage() {
 
   if (isLoadingUser) {
     return (
-      <MainLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <div className="animate-pulse text-muted-foreground">Loading...</div>
-        </div>
-      </MainLayout>
+      <div className="flex flex-1 items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading...</div>
+      </div>
     );
   }
 
   if (userError || !user) {
     return (
-      <MainLayout>
-        <div className="flex flex-1 items-center justify-center">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-center text-muted-foreground">User not found</p>
-            </CardContent>
-          </Card>
-        </div>
-      </MainLayout>
+      <div className="flex flex-1 items-center justify-center">
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-center text-muted-foreground">User not found</p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <MainLayout>
-      <div className="flex flex-1 flex-col max-w-4xl mx-auto w-full p-4 md:p-8">
+    <div className="flex flex-1 flex-col max-w-4xl mx-auto w-full p-4 md:p-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-4">
           <Button variant="ghost" size="sm" asChild>
@@ -204,7 +198,6 @@ export default function FollowersPage() {
           </Card>
         )}
       </div>
-    </MainLayout>
   );
 }
 

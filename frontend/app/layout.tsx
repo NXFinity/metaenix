@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ThemeProvider } from "@/theme/ThemeProvider";
+import { MainLayout } from "@/theme/layout/MainLayout";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,13 +22,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className="h-full dark">
-      <body className={`${geistSans.variable} ${geistMono.variable} h-full overflow-hidden`}>
+    <html lang="en" suppressHydrationWarning className="dark">
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <Providers>
           <ThemeProvider defaultTheme="dark">
-            <div className="h-full flex flex-col">
+            <MainLayout>
               {children}
-            </div>
+            </MainLayout>
           </ThemeProvider>
         </Providers>
       </body>

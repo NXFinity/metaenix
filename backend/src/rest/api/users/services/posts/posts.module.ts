@@ -11,6 +11,7 @@ import { Report } from './assets/entities/report.entity';
 import { Reaction } from './assets/entities/reaction.entity';
 import { Collection } from './assets/entities/collection.entity';
 import { User } from '../../assets/entities/user.entity';
+import { Follow } from '../follows/assets/entities/follow.entity';
 import { StorageModule } from 'src/rest/storage/storage.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { StorageModule } from 'src/rest/storage/storage.module';
       Reaction,
       Collection,
       User,
+      Follow,
     ]),
     StorageModule,
   ],

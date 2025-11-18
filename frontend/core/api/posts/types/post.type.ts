@@ -27,6 +27,7 @@ export interface Post {
   viewsCount: number;
   bookmarksCount: number;
   reportsCount: number;
+  isLiked?: boolean;
   userId: string;
   parentPostId?: string | null;
   dateCreated: string;

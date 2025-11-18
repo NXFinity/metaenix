@@ -99,6 +99,7 @@ export interface UpdateUserRequest {
     allowMessages?: boolean;
     allowNotifications?: boolean;
     allowFriendRequests?: boolean;
+    notifyOnFollow?: boolean;
   };
 }
 

@@ -11,7 +11,6 @@ import { AuthModule } from './security/auth/auth.module';
 import { RolesModule } from './security/roles';
 import { UsersModule } from './rest/api/users/users.module';
 import { WebsocketModule } from './rest/websocket/websocket.module';
-import { SessionStoreConfig } from './config/session-store.config';
 import { HealthModule } from './services/health/health.module';
 import { StartupModule } from './services/startup/startup.module';
 import { StorageModule } from './rest/storage/storage.module';
@@ -179,7 +178,6 @@ import { ScopeGuard } from './security/developer/services/scopes';
     { provide: 'APP_GUARD', useClass: ThrottleGuard },
     { provide: 'APP_GUARD', useClass: OAuthRateLimitGuard },
     { provide: 'APP_GUARD', useClass: ScopeGuard },
-    SessionStoreConfig,
   ],
 })
 export class AppModule {}

@@ -1,21 +1,15 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Observable } from 'rxjs';
+import { AuthGuard as PassportAuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import { AuthenticatedRequest } from '../../../common/interfaces/authenticated-request.interface';
 
 @Injectable()
-export class AuthGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+export class AuthGuard extends PassportAuthGuard('jwt') {
+  constructor(private reflector: Reflector) {
+    super();
+  }
 
-  canActivate(
-    context: ExecutionContext,
-  ): boolean | Promise<boolean> | Observable<boolean> {
+  canActivate(context: ExecutionContext) {
     // Check if route is marked as public
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
@@ -26,20 +20,7 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-
-    // Check if user is in session
-    if (!request.session || !request.session.user) {
-      throw new UnauthorizedException('Please login to access this resource');
-    }
-
-    // Attach user to request for use in controllers
-    // Note: session.user is a partial user object, but we need to create a User-like object
-    // The controllers will handle the partial user appropriately
-    if (request.session.user) {
-      request.user = request.session.user as any; // Type assertion needed as session.user is partial
-    }
-
-    return true;
+    // Use Passport's JWT strategy to validate token
+    return super.canActivate(context);
   }
 }
