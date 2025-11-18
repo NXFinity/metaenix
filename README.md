@@ -49,7 +49,7 @@ metaenix/
 **Language:** TypeScript  
 **Database:** PostgreSQL with TypeORM  
 **Cache:** Redis  
-**Status:** ✅ Production Ready
+**Status:** ✅ Production Ready | ✅ Active Development
 
 See [backend/README.md](backend/README.md) for detailed backend documentation.
 
@@ -69,9 +69,9 @@ See [frontend/README.md](frontend/README.md) for detailed frontend documentation
 
 **Comprehensive documentation is available on GitHub Pages:**
 
-- 📖 **[Full Documentation](https://nxfinity.github.io/enix_backend/)** - Complete API reference, guides, and tutorials
-- 💬 **[Discussions](https://github.com/NXFinity/enix_project/discussions)** - Community discussions and Q&A
-- 📝 **[Wiki](https://github.com/NXFinity/enix_project/wiki)** - Project wiki and additional resources
+- 📖 **[Full Documentation](https://nxfinity.github.io/metaenix/)** - Complete API reference, guides, and tutorials
+- 💬 **[Discussions](https://github.com/NXFinity/metaenix/discussions)** - Community discussions and Q&A
+- 📝 **[Wiki](https://github.com/NXFinity/metaenix/wiki)** - Project wiki and additional resources
 
 ### Documentation Includes
 
@@ -135,7 +135,7 @@ We welcome contributions! Please see our contributing guidelines:
 
 **Built with ❤️ by [NXFinity](https://github.com/NXFinity)**
 
-[Documentation](https://nxfinity.github.io/enix_backend/) • [Discussions](https://github.com/NXFinity/enix_project/discussions) • [Wiki](https://github.com/NXFinity/enix_project/wiki)
+[Documentation](https://nxfinity.github.io/metaenix/) • [Discussions](https://github.com/NXFinity/metaenix/discussions) • [Wiki](https://github.com/NXFinity/metaenix/wiki)
 
 </div>
 
