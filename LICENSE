@@ -1,21 +1,61 @@
-MIT License
+# Meta EN|IX Community Licence (MECL) v1.0
 
-Copyright (c) 2025 Meta EN|IX
+Copyright (c) 2025 Meta EN|IX.  
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software is licensed for community and non-commercial use only.  
+Commercial use requires a paid commercial licence from the copyright holder.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+## 1. Permissions (Non-Commercial Use)
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+You are permitted to:
+
+- Use the software for non-commercial purposes
+- Modify the software
+- Create derivative works
+- Fork the repository
+- Share non-commercial builds
+- Contribute improvements
+
+All copies, forks, and derivatives must include this licence.
+
+## 2. Restrictions
+
+You may not:
+
+- Use the software for commercial purposes without a commercial licence
+- Sell, rent, licence, or monetise the software or any derivative
+- Host or operate the software as part of a paid or revenue-generating service
+- Remove or alter copyright or licence notices
+- Re-license the software under any other licence
+- Use the Meta EN|IX name, branding, or trademarks without permission
+
+## 3. Commercial Licensing
+
+Commercial use includes, but is not limited to:
+
+- Revenue-generating activity
+- Business or organisational deployment
+- SaaS, hosting, or monetised distribution
+- Integration into commercial tools or products
+
+To obtain a commercial licence, contact:  
+contact@metaenix.com
+
+## 4. Warranty Disclaimer
+
+The software is provided "as is" without warranty of any kind.  
+The copyright holder is not liable for any damages or losses resulting from the use of the software.
+
+## 5. Termination
+
+This licence is automatically terminated if:
+
+- You breach any term of this licence
+- You use the software commercially without authorisation
+
+Upon termination, all rights granted to you are revoked and you must delete all copies of the software.
+
+## 6. Governing Law
+
+This licence is governed by the laws of the United Kingdom.
