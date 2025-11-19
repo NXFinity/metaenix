@@ -107,7 +107,8 @@ export class FollowsGateway
   }
 
   /**
-   * Notify a user that someone followed them (respects notification preferences)
+   * Notify a user that someone followed them via WebSocket (real-time only, no persistence)
+   * Note: Persistence is handled by NotificationsService listening to user.followed event
    */
   async notifyNewFollower(
     followingId: string,
@@ -126,38 +127,43 @@ export class FollowsGateway
         return;
       }
 
+      // Send real-time WebSocket event to /follows namespace (no persistence here)
+      // Persistence is handled by NotificationsService listening to user.followed event
       this.server.to(`user:${followingId}`).emit('new_follower', {
         followerId,
         timestamp: new Date().toISOString(),
       });
 
-      this.loggingService.log('Follow notification sent', 'FollowsGateway', {
+      this.loggingService.log('Follow alert sent via WebSocket', 'FollowsGateway', {
         category: LogCategory.USER_MANAGEMENT,
         userId: followingId,
         metadata: { followerId },
       });
     } catch (error) {
-      this.logger.error(`Error sending follow notification: ${error}`);
+      this.logger.error(`Error sending follow alert: ${error}`);
     }
   }
 
   /**
-   * Notify a user that someone unfollowed them
+   * Notify a user that someone unfollowed them via WebSocket (real-time only, no persistence)
+   * Note: Unfollow events are typically not persisted to avoid notification spam
    */
   async notifyUnfollow(followingId: string, followerId: string): Promise<void> {
     try {
+      // Send real-time WebSocket event only (no persistence for unfollows)
+      // This prevents notification spam from users who follow/unfollow repeatedly
       this.server.to(`user:${followingId}`).emit('unfollow', {
         followerId,
         timestamp: new Date().toISOString(),
       });
 
-      this.loggingService.log('Unfollow notification sent', 'FollowsGateway', {
+      this.loggingService.log('Unfollow alert sent via WebSocket', 'FollowsGateway', {
         category: LogCategory.USER_MANAGEMENT,
         userId: followingId,
         metadata: { followerId },
       });
     } catch (error) {
-      this.logger.error(`Error sending unfollow notification: ${error}`);
+      this.logger.error(`Error sending unfollow alert: ${error}`);
     }
   }
 

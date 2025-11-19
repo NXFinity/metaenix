@@ -132,20 +132,10 @@ export interface FollowSuggestion {
 }
 
 export interface FollowHistory {
-  id: string;
-  action: 'follow' | 'unfollow';
-  followerId: string;
-  followingId: string;
-  follower?: {
-    id: string;
-    username: string;
-    displayName: string;
-  };
-  following?: {
-    id: string;
-    username: string;
-    displayName: string;
-  };
-  dateCreated: string;
+  type: 'follow' | 'unfollow';
+  targetUserId: string;
+  targetUsername: string;
+  timestamp: string;
+  metadata?: Record<string, any>;
 }
 

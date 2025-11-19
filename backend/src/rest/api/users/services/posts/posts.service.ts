@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Post } from './assets/entities/post.entity';
 import { Comment } from './assets/entities/comment.entity';
 import { Like } from './assets/entities/like.entity';
@@ -63,6 +64,7 @@ export class PostsService {
     private readonly cachingService: CachingService,
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // #########################################################
@@ -564,6 +566,17 @@ export class PostsService {
         metadata: { commentId: savedComment.id, postId },
       });
 
+      // Emit event for post comment (only if not self-comment)
+      if (post.userId !== userId) {
+        this.eventEmitter.emit('post.commented', {
+          commenterId: userId,
+          postId,
+          commentId: savedComment.id,
+          postOwnerId: post.userId,
+          parentCommentId: createCommentDto.parentCommentId || null,
+        });
+      }
+
       return savedComment;
     } catch (error) {
       if (
@@ -648,6 +661,7 @@ export class PostsService {
       if (postId) {
         post = await this.postRepository.findOne({
           where: { id: postId },
+          relations: ['user'],
         });
 
         if (!post) {
@@ -658,6 +672,7 @@ export class PostsService {
       if (commentId) {
         comment = await this.commentRepository.findOne({
           where: { id: commentId },
+          relations: ['user', 'post'],
         });
 
         if (!comment) {
@@ -678,21 +693,46 @@ export class PostsService {
       const savedLike = await this.likeRepository.save(like);
 
       // Update counts atomically
-      if (postId) {
+      if (postId && post) {
         await this.postRepository.increment({ id: postId }, 'likesCount', 1);
         // Invalidate post cache
         await this.cachingService.invalidateByTags('post', `post:${postId}`);
+
+        // Emit event for post like (only if not self-like)
+        if (post.userId !== userId) {
+          this.eventEmitter.emit('post.liked', {
+            likerId: userId,
+            postId,
+            postOwnerId: post.userId,
+          });
+        }
       }
 
-      if (commentId) {
+      if (commentId && comment) {
         await this.commentRepository.increment({ id: commentId }, 'likesCount', 1);
         // Invalidate comment cache
         await this.cachingService.invalidateByTags(
           'comment',
           `comment:${commentId}`,
         );
-      }
 
+        // Get post to get post owner ID for the notification URL
+        const postForComment = comment.post || await this.postRepository.findOne({
+          where: { id: comment.postId },
+          select: ['id', 'userId'],
+        });
+
+        // Emit event for comment like (only if not self-like)
+        if (comment.userId !== userId) {
+          this.eventEmitter.emit('comment.liked', {
+            likerId: userId,
+            commentId,
+            commentOwnerId: comment.userId,
+            postId: comment.postId,
+            postOwnerId: postForComment?.userId || null,
+          });
+        }
+      }
 
       return savedLike;
     } catch (error) {
@@ -873,6 +913,16 @@ export class PostsService {
         userId,
         metadata: { shareId: result.share.id, postId },
       });
+
+      // Emit event for post share (only if not self-share)
+      if (originalPost.userId !== userId) {
+        this.eventEmitter.emit('post.shared', {
+          sharerId: userId,
+          postId,
+          postOwnerId: originalPost.userId,
+          shareId: result.share.id,
+        });
+      }
 
       return result.share;
     } catch (error) {
@@ -1526,6 +1576,94 @@ export class PostsService {
       );
 
       throw new InternalServerErrorException('Failed to find comments');
+    }
+  }
+
+  /**
+   * Get a single comment by ID
+   */
+  async findCommentById(
+    commentId: string,
+    userId?: string,
+  ): Promise<Record<string, any>> {
+    try {
+      const queryBuilder = this.commentRepository
+        .createQueryBuilder('comment')
+        .leftJoinAndSelect('comment.user', 'user')
+        .leftJoinAndSelect('user.profile', 'profile')
+        .leftJoinAndSelect('comment.parentComment', 'parentComment')
+        .where('comment.id = :commentId', { commentId })
+        .andWhere('comment.dateDeleted IS NULL');
+
+      const comment = await queryBuilder.getOne();
+
+      if (!comment) {
+        throw new NotFoundException('Comment not found');
+      }
+
+      // Check if user liked this comment
+      let isLiked = false;
+      if (userId) {
+        const like = await this.likeRepository.findOne({
+          where: {
+            userId,
+            commentId: comment.id,
+          },
+        });
+        isLiked = !!like;
+      }
+
+      // Serialize comment
+      return {
+        id: comment.id,
+        content: comment.content,
+        isEdited: comment.isEdited,
+        likesCount: comment.likesCount,
+        repliesCount: comment.repliesCount,
+        postId: comment.postId,
+        userId: comment.userId,
+        parentCommentId: comment.parentCommentId,
+        dateCreated: comment.dateCreated instanceof Date 
+          ? comment.dateCreated.toISOString() 
+          : comment.dateCreated,
+        dateUpdated: comment.dateUpdated instanceof Date 
+          ? comment.dateUpdated.toISOString() 
+          : comment.dateUpdated,
+        dateDeleted: comment.dateDeleted instanceof Date 
+          ? comment.dateDeleted.toISOString() 
+          : comment.dateDeleted || null,
+        user: comment.user
+          ? {
+              id: comment.user.id,
+              username: comment.user.username,
+              displayName: comment.user.displayName || comment.user.username,
+              profile: comment.user.profile
+                ? {
+                    avatar: comment.user.profile.avatar,
+                  }
+                : undefined,
+            }
+          : undefined,
+        isLiked,
+        parentComment: comment.parentComment || null,
+        replies: [],
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      this.loggingService.error(
+        'Failed to find comment',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+
+      throw new InternalServerErrorException('Failed to find comment');
     }
   }
 

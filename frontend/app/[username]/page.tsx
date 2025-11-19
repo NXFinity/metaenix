@@ -1,14 +1,15 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 import { userService } from '@/core/api/user';
 import { postsService } from '@/core/api/posts';
 import { followsService } from '@/core/api/follows';
 import { useAuth } from '@/core/hooks/useAuth';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/theme/ui/tabs';
@@ -18,21 +19,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/theme/ui/dialog';
+import { PostCard } from '@/theme/components/posts/Posts';
 import {
   HeartIcon,
   MessageCircleIcon,
   ShareIcon,
-  BookmarkIcon,
-  EyeIcon,
   UserPlusIcon,
   UserMinusIcon,
   SettingsIcon,
   ImageIcon,
   TrashIcon,
+  Loader2,
 } from 'lucide-react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faLock } from '@fortawesome/free-solid-svg-icons';
-import type { Post } from '@/core/api/posts';
+import type { Post, Comment } from '@/core/api/posts';
 
 // Date formatting helper
 const formatTimeAgo = (date: string) => {
@@ -49,7 +50,7 @@ const formatTimeAgo = (date: string) => {
   return `${Math.floor(diffInSeconds / 31536000)}y ago`;
 };
 
-export default function UserProfilePage() {
+function UserProfilePageContent() {
   const params = useParams();
   const username = params.username as string;
   const { user: currentUser, isAuthenticated } = useAuth();
@@ -65,9 +66,10 @@ export default function UserProfilePage() {
     enabled: !!username,
     staleTime: 5 * 60 * 1000, // 5 minutes - cache user profile data
     gcTime: 10 * 60 * 1000, // 10 minutes - keep in cache
-    retry: (failureCount, error: any) => {
+    retry: (failureCount, error: unknown) => {
       // Don't retry on 403 (Forbidden) or 404 (Not Found) errors
-      if (error?.response?.status === 403 || error?.response?.status === 404) {
+      const httpError = error as { response?: { status?: number } };
+      if (httpError?.response?.status === 403 || httpError?.response?.status === 404) {
         return false;
       }
       return failureCount < 2;
@@ -95,11 +97,12 @@ export default function UserProfilePage() {
       const previousUser = queryClient.getQueryData(['user', 'profile', username]);
       
       // Optimistically update
-      queryClient.setQueryData(['user', 'profile', username], (old: any) => {
-        if (!old) return old;
+      queryClient.setQueryData(['user', 'profile', username], (old: unknown) => {
+        const userData = old as { followersCount?: number } | undefined;
+        if (!userData) return old;
         return {
-          ...old,
-          followersCount: (old.followersCount || 0) + 1,
+          ...userData,
+          followersCount: (userData.followersCount || 0) + 1,
         };
       });
       
@@ -127,11 +130,12 @@ export default function UserProfilePage() {
       const previousUser = queryClient.getQueryData(['user', 'profile', username]);
       
       // Optimistically update
-      queryClient.setQueryData(['user', 'profile', username], (old: any) => {
-        if (!old) return old;
+      queryClient.setQueryData(['user', 'profile', username], (old: unknown) => {
+        const userData = old as { followersCount?: number } | undefined;
+        if (!userData) return old;
         return {
-          ...old,
-          followersCount: Math.max(0, (old.followersCount || 0) - 1),
+          ...userData,
+          followersCount: Math.max(0, (userData.followersCount || 0) - 1),
         };
       });
       
@@ -152,13 +156,13 @@ export default function UserProfilePage() {
   // Check if viewing own profile
   const isOwnProfile = isAuthenticated && currentUser?.id === user?.id;
 
-  // Fetch user's timeline (feed) - posts from users they follow + shared posts
+  // Fetch user's posts (only posts by this user, not feed)
   const {
     data: postsData,
     isLoading: isLoadingPosts,
   } = useQuery({
-    queryKey: ['posts', 'user', 'feed', user?.id],
-    queryFn: () => postsService.getUserFeed(user!.id, { page: 1, limit: 100 }),
+    queryKey: ['posts', 'user', user?.id],
+    queryFn: () => postsService.getByUser(user!.id, { page: 1, limit: 100 }),
     enabled: !!user?.id,
   });
 
@@ -193,11 +197,14 @@ export default function UserProfilePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace('#', '');
-      if (hash === 'media') {
-        setActiveTab('media');
+      if (hash === 'media' && activeTab !== 'media') {
+        // Use setTimeout to avoid synchronous setState in effect
+        setTimeout(() => {
+          setActiveTab('media');
+        }, 0);
       }
     }
-  }, []);
+  }, [activeTab]);
 
   // Delete media mutation
   const deleteMediaMutation = useMutation({
@@ -206,11 +213,11 @@ export default function UserProfilePage() {
       const post = postsData?.data.find((p) => p.id === postId);
       if (!post) throw new Error('Post not found');
 
-      const updateData: { mediaUrl?: string | null; mediaUrls?: string[] } = {};
+      const updateData: { mediaUrl?: string; mediaUrls?: string[] } = {};
 
       // Handle mediaUrl (single media)
       if (post.mediaUrl === mediaUrl) {
-        updateData.mediaUrl = null;
+        updateData.mediaUrl = undefined;
       }
 
       // Handle mediaUrls (multiple media)
@@ -276,7 +283,8 @@ export default function UserProfilePage() {
   }
 
   // Handle private profile error - show immediately without waiting for other queries
-  const isForbidden = error && (error as any)?.response?.status === 403;
+  const httpError = error as { response?: { status?: number } } | null;
+  const isForbidden = httpError?.response?.status === 403;
   
   if (error && isForbidden) {
     return (
@@ -658,15 +666,7 @@ export default function UserProfilePage() {
           {/* Comments Tab - Only visible when authenticated */}
           {isAuthenticated && (
             <TabsContent value="comments" className="mt-6">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center py-8 text-muted-foreground">
-                    <MessageCircleIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-lg mb-2">Comments</p>
-                    <p className="text-sm">Comments will be displayed here</p>
-                  </div>
-                </CardContent>
-              </Card>
+              <CommentsTab userId={user?.id} username={username} />
             </TabsContent>
           )}
 
@@ -935,324 +935,249 @@ export default function UserProfilePage() {
   );
 }
 
-function PostCard({ post }: { post: Post }) {
-  const params = useParams();
-  const username = params.username as string;
-  const { user: currentUser, isAuthenticated } = useAuth();
+// Comments Tab Component - Shows comments made on user's posts (only comments, not posts)
+function CommentsTab({ userId, username }: { userId?: string; username: string }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const author = post.user;
-  const displayName = author?.displayName || author?.username || 'Unknown';
-  const avatar = author?.profile?.avatar;
-  const hasMedia = post.mediaUrl || (post.mediaUrls && post.mediaUrls.length > 0);
-  
-  // Initialize state from post data
-  const postIsLiked = post.isLiked ?? false;
-  const [isLiked, setIsLiked] = useState(postIsLiked);
-  const [likesCount, setLikesCount] = useState(post.likesCount || 0);
+  const { isAuthenticated } = useAuth();
 
-  // Sync state with post data when it changes (e.g., after refetch)
-  useEffect(() => {
-    const currentPostIsLiked = post.isLiked ?? false;
-    const currentLikesCount = post.likesCount || 0;
-    
-    // Always sync with post data to ensure consistency
-    setIsLiked(currentPostIsLiked);
-    setLikesCount(currentLikesCount);
-  }, [post.id, post.isLiked, post.likesCount]);
+  // Fetch user's posts
+  const { data: postsData, isLoading: isLoadingPosts } = useQuery({
+    queryKey: ['posts', 'user', userId],
+    queryFn: () => postsService.getByUser(userId!, { page: 1, limit: 100 }),
+    enabled: !!userId,
+  });
 
-  // Like/Unlike mutation
-  const likeMutation = useMutation({
-    mutationFn: async (shouldLike: boolean) => {
-      if (shouldLike) {
-        return await postsService.like(post.id);
+  // Fetch comments for all posts (only for posts that have comments, paginate if needed)
+  const commentsQueries = useQueries({
+    queries: (postsData?.data || [])
+      .filter((post: Post) => (post.commentsCount || 0) > 0) // Only fetch for posts with comments
+      .map((post: Post) => ({
+        queryKey: ['posts', post.id, 'comments', 'tab'],
+        queryFn: async () => {
+          // Fetch all comments by paginating (max limit is 100 per page)
+          const allComments: Comment[] = [];
+          let page = 1;
+          let hasMore = true;
+          const limit = 100; // Maximum allowed by backend
+
+          while (hasMore) {
+            const response = await postsService.getComments(post.id, { page, limit });
+            allComments.push(...response.data);
+            
+            // Check if there are more pages
+            const totalPages = response.meta?.totalPages || 1;
+            hasMore = response.data.length === limit && page < totalPages;
+            page++;
+            
+            // Safety limit: don't fetch more than 10 pages (1000 comments max per post)
+            if (page > 10) break;
+          }
+
+          return {
+            data: allComments,
+            meta: {
+              page: 1,
+              limit: allComments.length,
+              total: allComments.length,
+              totalPages: 1,
+            },
+          };
+        },
+        enabled: !!post.id && !!postsData?.data && postsData.data.length > 0 && (post.commentsCount || 0) > 0,
+      })),
+  });
+
+  // Flatten all parent comments (top-level only, no replies) from all posts into a single array
+  const allComments = useMemo(() => {
+    const comments: Comment[] = [];
+    commentsQueries.forEach((query) => {
+      if (query.data?.data) {
+        // Only include top-level comments (no parentCommentId)
+        query.data.data.forEach((comment: Comment) => {
+          // Only add if it's a parent comment (no parentCommentId)
+          if (!comment.parentCommentId) {
+            comments.push(comment);
+          }
+        });
+      }
+    });
+    // Sort by date created (newest first)
+    return comments.sort((a, b) => 
+      new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime()
+    );
+  }, [commentsQueries]);
+
+  const isLoadingComments = commentsQueries.some((query) => query.isLoading);
+
+  // Like/Unlike comment mutation
+  const likeCommentMutation = useMutation({
+    mutationFn: (commentId: string) => {
+      // Find comment to check if liked
+      const comment = allComments.find((c) => c.id === commentId);
+      if (comment?.isLiked) {
+        return postsService.unlikeComment(commentId);
       } else {
-        return await postsService.unlike(post.id);
+        return postsService.likeComment(commentId);
       }
     },
-    onSuccess: (response) => {
-      // Update local state immediately
-      setIsLiked(response.liked);
-      setLikesCount((prev) => (response.liked ? prev + 1 : Math.max(0, prev - 1)));
-      
-      // Update the post in cache optimistically for all relevant queries
-      const updatePostInCache = (oldData: any) => {
-        if (!oldData?.data) return oldData;
-        return {
-          ...oldData,
-          data: oldData.data.map((p: any) =>
-            p.id === post.id
-              ? { 
-                  ...p, 
-                  isLiked: response.liked, 
-                  likesCount: response.liked 
-                    ? (p.likesCount || 0) + 1 
-                    : Math.max(0, (p.likesCount || 0) - 1) 
-                }
-              : p
-          ),
-        };
-      };
-      
-      // Update single post cache
-      queryClient.setQueryData(['posts', post.id], (oldPost: any) => {
-        if (!oldPost) return oldPost;
-        return {
-          ...oldPost,
-          isLiked: response.liked,
-          likesCount: response.liked
-            ? (oldPost.likesCount || 0) + 1
-            : Math.max(0, (oldPost.likesCount || 0) - 1),
-        };
-      });
-
-      // Update all post queries in cache immediately
-      queryClient.setQueriesData({ queryKey: ['posts', 'user'] }, updatePostInCache);
-      queryClient.setQueriesData({ queryKey: ['posts', 'liked'] }, updatePostInCache);
-      queryClient.setQueriesData({ queryKey: ['posts', 'feed'] }, updatePostInCache);
-      
-      // Also update the specific user's posts cache if we know the author
-      if (author?.id) {
-        queryClient.setQueryData(['posts', 'user', author.id], updatePostInCache);
-      }
-      
-      // Invalidate posts queries to refresh data from server (ensures isLiked is correct)
-      queryClient.invalidateQueries({ queryKey: ['posts', post.id] });
-      queryClient.invalidateQueries({ queryKey: ['posts'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'user'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'liked'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-    },
-    onError: (error: any, shouldLike) => {
-      // Handle "Already liked" error gracefully - treat as success
-      if (error?.response?.status === 400 && error?.response?.data?.message === 'Already liked') {
-        // Post is already liked, sync state
-        setIsLiked(true);
-        // Don't revert count since it's already correct
-        return;
-      }
-      
-      // Handle "Like not found" error gracefully - treat as success for unlike
-      if (error?.response?.status === 404 && shouldLike === false) {
-        // Post is already unliked, sync state
-        setIsLiked(false);
-        // Don't revert count since it's already correct
-        return;
-      }
-      
-      // Revert optimistic update on other errors
-      setIsLiked(!shouldLike);
-      setLikesCount((prev) => (shouldLike ? Math.max(0, prev - 1) : prev + 1));
-    },
-  });
-
-  const handleLike = () => {
-    if (!isAuthenticated || likeMutation.isPending) return;
-    // Optimistic update
-    const newLikedState = !isLiked;
-    setIsLiked(newLikedState);
-    setLikesCount((prev) => (newLikedState ? prev + 1 : Math.max(0, prev - 1)));
-    likeMutation.mutate(newLikedState);
-  };
-
-  // Share mutation
-  const shareMutation = useMutation({
-    mutationFn: () => postsService.share(post.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['posts', 'user'] });
-      queryClient.invalidateQueries({ queryKey: ['posts'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'shared'] });
-    },
-    onError: (error: any) => {
-      console.error('Error sharing post:', error);
-      // You can add a toast notification here if needed
+      // Invalidate all comment queries
+      commentsQueries.forEach((query) => {
+        if (query.data?.data) {
+          query.data.data.forEach((comment: Comment) => {
+            queryClient.invalidateQueries({ queryKey: ['posts', comment.postId, 'comments'] });
+          });
+        }
+      });
     },
   });
 
-  const handleShare = () => {
-    if (!isAuthenticated || shareMutation.isPending) return;
-    shareMutation.mutate();
+  const handleLikeComment = (commentId: string) => {
+    if (!isAuthenticated || likeCommentMutation.isPending) return;
+    likeCommentMutation.mutate(commentId);
   };
+
+  const handleViewComment = (comment: Comment) => {
+    const post = postsData?.data.find((p: Post) => p.id === comment.postId);
+    if (post?.user?.username) {
+      router.push(`/${post.user.username}/posts/comment/${comment.id}?postId=${post.id}`);
+    }
+  };
+
+  // Get post info for each comment
+  const getPostForComment = (comment: Comment) => {
+    return postsData?.data.find((post: Post) => post.id === comment.postId);
+  };
+
+  if (isLoadingPosts || isLoadingComments) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="text-center py-8 text-muted-foreground">
+            <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin text-primary" />
+            <p>Loading comments...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (allComments.length === 0) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="text-center py-8 text-muted-foreground">
+            <MessageCircleIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p className="text-lg mb-2">No comments yet</p>
+            <p className="text-sm">Comments made on {username}&apos;s posts will appear here</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <Card className="hover:shadow-lg transition-all duration-300 border-border/50 hover:border-primary/20">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <Link href={`/${author?.username || ''}`} className="flex-shrink-0">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center overflow-hidden ring-2 ring-border hover:ring-primary/50 transition-all">
-                {avatar ? (
-                  <Image
-                    src={avatar}
-                    alt={displayName}
-                    width={40}
-                    height={40}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-sm font-bold text-primary">
-                    {displayName[0].toUpperCase()}
-                  </span>
-                )}
-              </div>
-            </Link>
-            <div className="flex-1 min-w-0">
-              <Link href={`/${author?.username || ''}`}>
-                <p className="font-semibold text-foreground hover:text-primary transition-colors truncate">
-                  {displayName}
-                </p>
-              </Link>
-              <p className="text-xs text-muted-foreground">
-                {formatTimeAgo(post.dateCreated)}
-                {post.isEdited && ' · Edited'}
-              </p>
-            </div>
-          </div>
-          {post.isPinned && (
-            <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full border border-primary/20 flex-shrink-0">
-              📌 Pinned
-            </span>
-          )}
+    <div className="space-y-4">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-bold text-foreground">Comments</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {allComments.length} {allComments.length === 1 ? 'comment' : 'comments'} on {username}&apos;s posts
+          </p>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Post Content */}
-        {post.content && (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
-            <p className="whitespace-pre-wrap break-words">{post.content}</p>
-          </div>
-        )}
+      </div>
 
-        {/* Media */}
-        {post.mediaUrl && (
-          <div className="rounded-lg overflow-hidden">
-            <Image
-              src={post.mediaUrl}
-              alt="Post media"
-              width={800}
-              height={600}
-              className="w-full h-auto object-contain"
-            />
-          </div>
-        )}
+      <div className="space-y-4">
+        {allComments.map((comment) => {
+          const post = getPostForComment(comment);
+          if (!post) return null;
 
-        {post.mediaUrls && post.mediaUrls.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            {post.mediaUrls.slice(0, 4).map((url, idx) => (
-              <div key={idx} className="rounded-lg overflow-hidden">
-                <Image
-                  src={url}
-                  alt={`Post media ${idx + 1}`}
-                  width={400}
-                  height={300}
-                  className="w-full h-auto object-cover"
-                />
-              </div>
-            ))}
-          </div>
-        )}
+          return (
+            <Card key={comment.id} className="hover:shadow-md transition-shadow">
+              <CardContent className="pt-6">
+                {/* Post Context */}
+                <div className="mb-4 pb-4 border-b border-border/50">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Link 
+                      href={`/${username}/posts/${post.id}`}
+                      className="hover:text-primary transition-colors"
+                    >
+                      <span className="font-medium">Post:</span> {post.content ? post.content.slice(0, 100) : 'View post'}
+                      {post.content && post.content.length > 100 && '...'}
+                    </Link>
+                  </div>
+                </div>
 
-        {/* Link Preview */}
-        {post.linkUrl && (
-          <Link
-            href={post.linkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block border rounded-lg p-4 hover:bg-muted/50 transition-colors"
-          >
-            {post.linkImage && (
-              <div className="mb-3 rounded overflow-hidden">
-                <Image
-                  src={post.linkImage}
-                  alt={post.linkTitle || 'Link preview'}
-                  width={600}
-                  height={315}
-                  className="w-full h-auto object-cover"
-                />
-              </div>
-            )}
-            {post.linkTitle && (
-              <p className="font-semibold text-foreground mb-1">
-                {post.linkTitle}
-              </p>
-            )}
-            {post.linkDescription && (
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {post.linkDescription}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground mt-2">
-              {new URL(post.linkUrl).hostname}
-            </p>
-          </Link>
-        )}
+                {/* Comment Card */}
+                <div className="flex gap-3">
+                  <Link href={`/${comment.user?.username || ''}`} className="flex-shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center overflow-hidden">
+                      {comment.user?.profile?.avatar ? (
+                        <Image
+                          src={comment.user.profile.avatar}
+                          alt={comment.user.displayName || comment.user.username}
+                          width={32}
+                          height={32}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-bold text-primary">
+                          {(comment.user?.displayName || comment.user?.username || 'U')[0].toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div>
+                        <Link href={`/${comment.user?.username || ''}`}>
+                          <p className="text-sm font-semibold text-foreground hover:text-primary">
+                            {comment.user?.displayName || comment.user?.username || 'Unknown'}
+                          </p>
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTimeAgo(comment.dateCreated)}
+                          {comment.isEdited && ' · Edited'}
+                        </p>
+                      </div>
+                    </div>
+                    <p 
+                      className="text-sm whitespace-pre-wrap break-words mb-2 cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => handleViewComment(comment)}
+                    >
+                      {comment.content}
+                    </p>
+                    <div className="flex items-center gap-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto p-1 text-xs text-muted-foreground hover:text-red-500"
+                        onClick={() => handleLikeComment(comment.id)}
+                        disabled={!isAuthenticated || likeCommentMutation.isPending}
+                      >
+                        <HeartIcon
+                          className={`h-3.5 w-3.5 mr-1 ${comment.isLiked ? 'fill-red-500 text-red-500' : ''}`}
+                        />
+                        <span>{comment.likesCount || 0}</span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-        {/* Hashtags */}
-        {post.hashtags && post.hashtags.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {post.hashtags.map((tag, idx) => (
-              <Link
-                key={idx}
-                href={`/search?q=${encodeURIComponent(tag)}`}
-                className="text-sm text-primary hover:underline"
-              >
-                #{tag}
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {/* Interactions */}
-        <div className="flex items-center gap-4 md:gap-6 pt-3 border-t border-border/50">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleLike}
-            disabled={!isAuthenticated || likeMutation.isPending}
-            className={`gap-2 transition-colors ${
-              isLiked
-                ? 'text-red-500 bg-red-500/10 hover:text-red-600 hover:bg-red-500/20'
-                : 'text-muted-foreground hover:text-red-500 hover:bg-red-500/10'
-            }`}
-          >
-            <HeartIcon className={`h-4 w-4 ${isLiked ? 'fill-current' : ''}`} />
-            <span className="font-medium">{likesCount}</span>
-          </Button>
-          <Link href={`/posts/${post.id}`}>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-            >
-              <MessageCircleIcon className="h-4 w-4" />
-              <span className="font-medium">{post.commentsCount || 0}</span>
-            </Button>
-          </Link>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleShare}
-            disabled={!isAuthenticated || shareMutation.isPending}
-            className="gap-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-          >
-            <ShareIcon className="h-4 w-4" />
-            <span className="font-medium">{post.sharesCount || 0}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2 text-muted-foreground hover:text-yellow-500 hover:bg-yellow-500/10 transition-colors"
-          >
-            <BookmarkIcon className="h-4 w-4" />
-            <span className="font-medium">{post.bookmarksCount || 0}</span>
-          </Button>
-          <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-md">
-            <EyeIcon className="h-3.5 w-3.5" />
-            <span className="font-medium">{post.viewsCount || 0}</span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+export default function UserProfilePage() {
+  return (
+    <RouteErrorBoundary>
+      <UserProfilePageContent />
+    </RouteErrorBoundary>
   );
 }
 

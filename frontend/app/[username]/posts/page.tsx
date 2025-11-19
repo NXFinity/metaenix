@@ -554,7 +554,7 @@ function PostCard({ post }: { post: Post }) {
   const avatar = author?.profile?.avatar;
   const isOwnPost = currentUser?.id === post.userId;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  
+
   // Initialize state from post data
   const postIsLiked = post.isLiked ?? false;
   const [isLiked, setIsLiked] = useState(postIsLiked);
@@ -564,7 +564,7 @@ function PostCard({ post }: { post: Post }) {
   useEffect(() => {
     const currentPostIsLiked = post.isLiked ?? false;
     const currentLikesCount = post.likesCount || 0;
-    
+
     // Always sync with post data to ensure consistency
     setIsLiked(currentPostIsLiked);
     setLikesCount(currentLikesCount);
@@ -583,7 +583,7 @@ function PostCard({ post }: { post: Post }) {
       // Update local state immediately
       setIsLiked(response.liked);
       setLikesCount((prev) => (response.liked ? prev + 1 : Math.max(0, prev - 1)));
-      
+
       // Update the post in cache optimistically for all relevant queries
       const updatePostInCache = (oldData: any) => {
         if (!oldData?.data) return oldData;
@@ -591,18 +591,18 @@ function PostCard({ post }: { post: Post }) {
           ...oldData,
           data: oldData.data.map((p: any) =>
             p.id === post.id
-              ? { 
-                  ...p, 
-                  isLiked: response.liked, 
-                  likesCount: response.liked 
-                    ? (p.likesCount || 0) + 1 
-                    : Math.max(0, (p.likesCount || 0) - 1) 
+              ? {
+                  ...p,
+                  isLiked: response.liked,
+                  likesCount: response.liked
+                    ? (p.likesCount || 0) + 1
+                    : Math.max(0, (p.likesCount || 0) - 1)
                 }
               : p
           ),
         };
       };
-      
+
       // Update single post cache
       queryClient.setQueryData(['posts', post.id], (oldPost: any) => {
         if (!oldPost) return oldPost;
@@ -619,7 +619,7 @@ function PostCard({ post }: { post: Post }) {
       queryClient.setQueriesData({ queryKey: ['posts', 'user'] }, updatePostInCache);
       queryClient.setQueriesData({ queryKey: ['posts'] }, updatePostInCache);
       queryClient.setQueriesData({ queryKey: ['posts', 'feed'] }, updatePostInCache);
-      
+
       // Invalidate posts queries to refresh data from server (ensures isLiked is correct)
       queryClient.invalidateQueries({ queryKey: ['posts', post.id] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
@@ -634,7 +634,7 @@ function PostCard({ post }: { post: Post }) {
         // Don't revert count since it's already correct
         return;
       }
-      
+
       // Handle "Like not found" error gracefully - treat as success for unlike
       if (error?.response?.status === 404 && shouldLike === false) {
         // Post is already unliked, sync state
@@ -642,7 +642,7 @@ function PostCard({ post }: { post: Post }) {
         // Don't revert count since it's already correct
         return;
       }
-      
+
       // Revert optimistic update on other errors
       setIsLiked(!shouldLike);
       setLikesCount((prev) => (shouldLike ? Math.max(0, prev - 1) : prev + 1));
@@ -878,7 +878,7 @@ function PostCard({ post }: { post: Post }) {
             <HeartIcon className={`h-4 w-4 ${isLiked ? 'fill-current' : ''}`} />
             <span>{likesCount}</span>
           </Button>
-          <Link href={`/posts/${post.id}`}>
+          <Link href={`/${post.user?.username || ''}/posts/${post.id}`}>
             <Button
               variant="ghost"
               size="sm"

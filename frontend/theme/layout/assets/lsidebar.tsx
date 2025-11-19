@@ -4,6 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/core/hooks/useAuth';
+import { useUnreadCount } from '@/core/hooks/useNotifications';
 import { cn } from '@/lib/utils';
 import { useMemo, memo, useRef, useEffect } from 'react';
 import {
@@ -16,6 +17,7 @@ import {
   CompassIcon,
   PlusIcon,
   FileTextIcon,
+  BellIcon,
 } from 'lucide-react';
 import { Button } from '@/theme/ui/button';
 import { Separator } from '@/theme/ui/separator';
@@ -37,6 +39,7 @@ interface NavGroup {
 function LeftSidebarComponent() {
   const pathname = usePathname();
   const { user, isAuthenticated, isInitializing } = useAuth();
+  const { unreadCount } = useUnreadCount();
   const sidebarRef = useRef<HTMLElement>(null);
   
   // Store previous pathname to detect changes
@@ -81,6 +84,13 @@ function LeftSidebarComponent() {
           requiresAuth: true,
         },
         {
+          label: 'Notifications',
+          href: `/${user.username}/notifications`,
+          icon: BellIcon,
+          requiresAuth: true,
+          badge: unreadCount > 0 ? unreadCount : undefined,
+        },
+        {
           label: 'Dashboard',
           href: `/${user.username}/dashboard`,
           icon: LayoutDashboardIcon,
@@ -106,6 +116,13 @@ function LeftSidebarComponent() {
           requiresAdmin: true,
         },
         {
+          label: 'Test',
+          href: '/test',
+          icon: CodeIcon,
+          requiresAuth: true,
+          requiresAdmin: true,
+        },
+        {
           label: 'Settings',
           href: `/${user.username}/settings`,
           icon: SettingsIcon,
@@ -114,7 +131,7 @@ function LeftSidebarComponent() {
       ],
     },
     ];
-  }, [user?.username]);
+  }, [user?.username, unreadCount]);
 
   // Stable function that checks if a route is active - memoized to prevent recreation
   const isActive = useMemo(() => {
@@ -126,6 +143,11 @@ function LeftSidebarComponent() {
       // For profile page, only match exact path (not sub-pages)
       if (href === `/${user?.username}`) {
         return pathname === `/${user?.username}`;
+      }
+      
+      // For notifications page, match exact path
+      if (href === `/${user?.username}/notifications`) {
+        return pathname === `/${user?.username}/notifications`;
       }
       
       // For other pages, check if pathname starts with href

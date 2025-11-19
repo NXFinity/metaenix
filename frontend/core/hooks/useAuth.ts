@@ -3,6 +3,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { authService } from '@/core/api/auth';
 import { useAuthStore } from '@/core/store/auth-store';
+import { tokenStorage, migrateLegacyTokens } from '@/lib/auth/token-storage';
 import type {
   RegisterRequest,
   LoginRequest,
@@ -142,9 +143,12 @@ export const useAuth = (): UseAuthReturn => {
         return;
       }
 
-      // Check if we have tokens in localStorage
-      const accessToken = localStorage.getItem('accessToken');
-      const refreshToken = localStorage.getItem('refreshToken');
+      // Migrate legacy tokens if they exist
+      migrateLegacyTokens();
+
+      // Check if we have tokens using secure token storage
+      const accessToken = tokenStorage.getAccessToken();
+      const refreshToken = tokenStorage.getRefreshToken();
 
       // Check React Query cache first
       const cachedUser = queryClient.getQueryData<User>(['auth', 'me']);
@@ -168,8 +172,7 @@ export const useAuth = (): UseAuthReturn => {
           }
         } catch (error) {
           // Token invalid or expired - clear tokens
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
+          tokenStorage.clearTokens();
           logoutStore();
           queryClient.setQueryData(['auth', 'me'], null);
         }
@@ -207,11 +210,15 @@ export const useAuth = (): UseAuthReturn => {
       }
       
       // Login successful - store tokens and fetch full user data
-      if (response.user && response.accessToken && response.refreshToken) {
-        // Store tokens
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('accessToken', response.accessToken);
-          localStorage.setItem('refreshToken', response.refreshToken);
+      // Check if using httpOnly cookies (tokens in cookies, not in response)
+      const useCookies = process.env.NEXT_PUBLIC_USE_HTTPONLY_COOKIES === 'true';
+      
+      if (response.user) {
+        // If using cookies, tokens are already set by backend in httpOnly cookies
+        // If not using cookies, store tokens from response
+        if (!useCookies && response.accessToken && response.refreshToken) {
+          tokenStorage.setAccessToken(response.accessToken);
+          tokenStorage.setRefreshToken(response.refreshToken);
         }
         
         // Fetch full user data with all relations (profile, privacy, security)
@@ -247,11 +254,14 @@ export const useAuth = (): UseAuthReturn => {
       });
     },
     onSuccess: async (response) => {
-      if (response.user && response.accessToken && response.refreshToken) {
-        // Store tokens
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('accessToken', response.accessToken);
-          localStorage.setItem('refreshToken', response.refreshToken);
+      const useCookies = process.env.NEXT_PUBLIC_USE_HTTPONLY_COOKIES === 'true';
+      
+      if (response.user) {
+        // If using cookies, tokens are already set by backend in httpOnly cookies
+        // If not using cookies, store tokens from response
+        if (!useCookies && response.accessToken && response.refreshToken) {
+          tokenStorage.setAccessToken(response.accessToken);
+          tokenStorage.setRefreshToken(response.refreshToken);
         }
         
         // Fetch full user data with all relations (profile, privacy, security)
@@ -278,21 +288,15 @@ export const useAuth = (): UseAuthReturn => {
   const logoutMutation = useMutation({
     mutationFn: () => authService.logout(),
     onSuccess: () => {
-      // Clear tokens from localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-      }
+      // Clear tokens using secure token storage
+      tokenStorage.clearTokens();
       logoutStore();
       queryClient.clear(); // Clear all queries
       router.push('/login');
     },
     onError: () => {
       // Even if logout fails, clear local state
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-      }
+      tokenStorage.clearTokens();
       logoutStore();
       queryClient.clear();
       router.push('/login');
@@ -374,8 +378,7 @@ export const useAuth = (): UseAuthReturn => {
    * On client: check tokens OR user to handle cases where tokens exist but user hasn't been fetched yet
    * During initialization with tokens: consider authenticated to prevent redirects
    */
-  const hasTokens = typeof window !== 'undefined' && 
-    (localStorage.getItem('accessToken') || localStorage.getItem('refreshToken'));
+  const hasTokens = tokenStorage.hasTokens();
   // On server or before mount, only check user. After mount or during init with tokens, also check tokens.
   const isAuthenticated = !!user || (isMounted && !!hasTokens) || (isInitializing && !!hasTokens);
 

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, MoreThanOrEqual } from 'typeorm';
+import { Repository, In, MoreThanOrEqual, IsNull } from 'typeorm';
 import { Follow } from './assets/entities/follow.entity';
 import { User } from '../../assets/entities/user.entity';
 import { LoggingService } from '@logging/logging';
@@ -52,9 +52,13 @@ export class FollowsService {
         throw new BadRequestException('You cannot follow yourself');
       }
 
-      // Check if already following
+      // Check if already following (excluding soft-deleted follows)
       const existingFollow = await this.followRepository.findOne({
-        where: { followerId, followingId },
+        where: { 
+          followerId, 
+          followingId,
+          dateDeleted: IsNull(),
+        },
       });
 
       if (existingFollow) {
@@ -160,7 +164,11 @@ export class FollowsService {
   async unfollowUser(followerId: string, followingId: string): Promise<void> {
     try {
       const follow = await this.followRepository.findOne({
-        where: { followerId, followingId },
+        where: { 
+          followerId, 
+          followingId,
+          dateDeleted: IsNull(),
+        },
       });
 
       if (!follow) {
@@ -242,7 +250,11 @@ export class FollowsService {
       }
 
       const follow = await this.followRepository.findOne({
-        where: { followerId, followingId },
+        where: { 
+          followerId, 
+          followingId,
+          dateDeleted: IsNull(),
+        },
       });
 
       const isFollowing = !!follow;
@@ -312,6 +324,7 @@ export class FollowsService {
           where: {
             followerId,
             followingId: In(uncachedIds),
+            dateDeleted: IsNull(),
           },
           select: ['followingId'],
         });

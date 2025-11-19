@@ -510,6 +510,21 @@ export class PostsController {
     );
   }
 
+  @Post(':postId/view')
+  @Public()
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Track a post view' })
+  @ApiParam({ name: 'postId', description: 'Post ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Post view tracked successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Post not found' })
+  trackPostView(@Param('postId') postId: string, @CurrentUser() user?: any) {
+    const userId = user?.id;
+    return this.postsService.trackPostView(postId, userId);
+  }
+
   @Get(':postId')
   @Public()
   @RequireScope('read:posts') // Required for OAuth tokens accessing private posts
@@ -525,30 +540,21 @@ export class PostsController {
     return this.postsService.findOne(postId, userId);
   }
 
-  @Get(':postId/comments')
+  @Get('comments/:commentId')
   @RequireScope('read:comments')
-  @ApiOperation({ summary: 'Get comments for a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'sortBy', required: false, type: String })
-  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiOperation({ summary: 'Get a comment by ID' })
+  @ApiParam({ name: 'commentId', description: 'Comment ID' })
   @ApiResponse({
     status: 200,
-    description: 'Comments retrieved successfully',
+    description: 'Comment retrieved successfully',
   })
-  @ApiResponse({ status: 404, description: 'Post not found' })
-  findCommentsByPostId(
-    @Param('postId') postId: string,
-    @Query() paginationDto: PaginationDto,
+  @ApiResponse({ status: 404, description: 'Comment not found' })
+  findCommentById(
+    @Param('commentId') commentId: string,
     @CurrentUser() user?: any,
   ) {
     const userId = user?.id;
-    return this.postsService.findCommentsByPostId(
-      postId,
-      paginationDto,
-      userId,
-    );
+    return this.postsService.findCommentById(commentId, userId);
   }
 
   @Get('comments/:commentId/replies')
@@ -572,6 +578,32 @@ export class PostsController {
     const userId = user?.id;
     return this.postsService.findRepliesByCommentId(
       commentId,
+      paginationDto,
+      userId,
+    );
+  }
+
+  @Get(':postId/comments')
+  @RequireScope('read:comments')
+  @ApiOperation({ summary: 'Get comments for a post' })
+  @ApiParam({ name: 'postId', description: 'Post ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, type: String })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
+  @ApiResponse({
+    status: 200,
+    description: 'Comments retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Post not found' })
+  findCommentsByPostId(
+    @Param('postId') postId: string,
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: any,
+  ) {
+    const userId = user?.id;
+    return this.postsService.findCommentsByPostId(
+      postId,
       paginationDto,
       userId,
     );

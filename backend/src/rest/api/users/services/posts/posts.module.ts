@@ -13,6 +13,8 @@ import { Collection } from './assets/entities/collection.entity';
 import { User } from '../../assets/entities/user.entity';
 import { Follow } from '../follows/assets/entities/follow.entity';
 import { StorageModule } from 'src/rest/storage/storage.module';
+import { PostsGateway } from './posts.gateway';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 @Module({
   imports: [
@@ -29,9 +31,10 @@ import { StorageModule } from 'src/rest/storage/storage.module';
       Follow,
     ]),
     StorageModule,
+    EventEmitterModule,
   ],
   controllers: [PostsController],
-  providers: [PostsService],
+  providers: [PostsService, PostsGateway],
   exports: [PostsService],
 })
 export class PostsModule {}

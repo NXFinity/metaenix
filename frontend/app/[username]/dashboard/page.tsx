@@ -645,7 +645,7 @@ function RecentActivityItem({ post, username }: { post: Post; username: string }
   const truncatedContent = post.content && post.content.length > 150 ? `${contentPreview}...` : contentPreview;
 
   return (
-    <Link href={`/posts/${post.id}`} className="block">
+    <Link href={`/${post.user?.username || ''}/posts/${post.id}`} className="block">
       <div className="p-4 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">

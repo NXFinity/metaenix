@@ -24,6 +24,7 @@ import { ThrottleGuard } from '@throttle/throttle';
 import { OAuthRateLimitGuard } from './security/developer/services/rate-limit';
 import { OAuthGuard } from './security/developer/services/oauth';
 import { ScopeGuard } from './security/developer/services/scopes';
+import { NotificationsModule } from './rest/api/notificaitons/notificaitons.module';
 
 // Configuration Variables
 
@@ -170,6 +171,7 @@ import { ScopeGuard } from './security/developer/services/scopes';
     StartupModule,
     StorageModule,
     DeveloperModule,
+    NotificationsModule,
   ],
   controllers: [],
   providers: [

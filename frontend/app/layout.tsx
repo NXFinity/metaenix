@@ -4,6 +4,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { MainLayout } from "@/theme/layout/MainLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AlertsProvider } from "@/theme/components/alerts";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,13 +26,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning className="dark">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        <Providers>
-          <ThemeProvider defaultTheme="dark">
-            <MainLayout>
-              {children}
-            </MainLayout>
-          </ThemeProvider>
-        </Providers>
+        <ErrorBoundary>
+          <Providers>
+            <ThemeProvider defaultTheme="dark">
+              <AlertsProvider>
+                <MainLayout>
+                  {children}
+                </MainLayout>
+              </AlertsProvider>
+            </ThemeProvider>
+          </Providers>
+        </ErrorBoundary>
       </body>
     </html>
   );

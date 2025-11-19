@@ -51,6 +51,7 @@ export interface Comment {
   isEdited: boolean;
   likesCount: number;
   repliesCount: number;
+  isLiked?: boolean;
   postId: string;
   userId: string;
   parentCommentId?: string | null;

@@ -423,6 +423,18 @@ const postsService = {
   },
 
   /**
+   * Get a comment by ID
+   * @param commentId - Comment UUID
+   * @returns Comment data
+   */
+  async getCommentById(commentId: string): Promise<Comment> {
+    const response = await apiClient.get<Comment>(
+      POSTS_ENDPOINTS.GET_COMMENT_BY_ID(commentId),
+    );
+    return response.data;
+  },
+
+  /**
    * Get replies to a comment
    * @param commentId - Comment UUID
    * @param params - Pagination parameters
@@ -622,6 +634,15 @@ const postsService = {
       { params },
     );
     return response.data;
+  },
+
+  /**
+   * Track a post view
+   * @param postId - Post UUID
+   * @returns Promise that resolves when view is tracked
+   */
+  async trackView(postId: string): Promise<void> {
+    await apiClient.post(POSTS_ENDPOINTS.TRACK_VIEW(postId));
   },
 
   /**

@@ -162,6 +162,12 @@ export const POSTS_ENDPOINTS = {
   CREATE_COMMENT: (postId: string) => `/posts/${postId}/comments`,
 
   /**
+   * Get a comment by ID
+   * GET /posts/comments/:commentId
+   */
+  GET_COMMENT_BY_ID: (commentId: string) => `/posts/comments/${commentId}`,
+
+  /**
    * Get replies to a comment
    * GET /posts/comments/:commentId/replies?page=1&limit=20
    */
@@ -241,6 +247,12 @@ export const POSTS_ENDPOINTS = {
    */
   GET_COLLECTION_POSTS: (collectionId: string) =>
     `/posts/collections/${collectionId}/posts`,
+
+  /**
+   * Track a post view
+   * POST /posts/:postId/view
+   */
+  TRACK_VIEW: (postId: string) => `/posts/${postId}/view`,
 
   /**
    * Get post analytics

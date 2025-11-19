@@ -322,11 +322,6 @@ function UserCard({ user, isSuggestion = false }: { user: User & { mutualConnect
               )}
             </Button>
           )}
-          {!isAuthenticated && (
-            <Button variant="outline" size="sm" asChild className="w-full">
-              <Link href="/login">View Profile</Link>
-            </Button>
-          )}
         </div>
       </CardContent>
     </Card>

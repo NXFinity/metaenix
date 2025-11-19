@@ -5,6 +5,7 @@ import { getCorsOriginFunction, getCorsOrigins } from './config/cors.config';
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { setupSwagger } from './functions/swagger.function';
+import * as cookieParser from 'cookie-parser';
 
 const chalk = require('chalk');
 const logger = new Logger('Bootstrap');
@@ -27,6 +28,9 @@ async function bootstrap() {
       ],
     },
   });
+
+  // Enable cookie parser for httpOnly cookie support
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({

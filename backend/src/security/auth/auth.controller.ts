@@ -5,8 +5,10 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Res,
   HttpException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -330,8 +332,9 @@ export class AuthController {
       },
     },
   })
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    // Pass response object to auth service for cookie support
+    return this.authService.login(loginDto, res);
   }
 
   @Public()
@@ -393,8 +396,8 @@ export class AuthController {
     status: 404,
     description: 'User not found',
   })
-  async verifyLogin2fa(@Body() verifyDto: VerifyLogin2faDto) {
-    return this.authService.verifyLogin2fa(verifyDto);
+  async verifyLogin2fa(@Body() verifyDto: VerifyLogin2faDto, @Res({ passthrough: true }) res: Response) {
+    return this.authService.verifyLogin2fa(verifyDto, res);
   }
 
   @Post('logout')
@@ -433,6 +436,7 @@ export class AuthController {
   })
   async logout(
     @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
     @Body() body?: { refreshToken?: string },
   ) {
     const userId = request.user?.id;
@@ -442,7 +446,7 @@ export class AuthController {
         HttpStatus.UNAUTHORIZED,
       );
     }
-    await this.authService.logout(userId, body?.refreshToken);
+    await this.authService.logout(userId, body?.refreshToken, res);
     return {
       message: 'Logout successful',
     };

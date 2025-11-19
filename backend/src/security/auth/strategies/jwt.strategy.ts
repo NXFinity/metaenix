@@ -12,7 +12,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new Error('JWT_SECRET environment variable is required');
     }
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        // Try cookie first (for httpOnly cookies)
+        (request: any) => {
+          return request?.cookies?.accessToken || null;
+        },
+        // Fallback to Authorization header (for legacy Bearer tokens)
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: jwtSecret,
     });

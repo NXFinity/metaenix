@@ -51,9 +51,15 @@ export class AuthService {
 
   /**
    * Generate JWT access token and refresh token for a user
+   * @param user - User entity
+   * @param response - Express response object (optional, for setting cookies)
+   * @returns Auth response with tokens (or sets cookies if response provided)
    */
-  private async generateAuthResponse(user: User) {
+  private async generateAuthResponse(user: User, response?: any) {
     const { password: _, security, ...userWithoutPassword } = user;
+
+    // Check if using httpOnly cookies (declare once at top of function)
+    const useCookies = this.configService.get<string>('USE_HTTPONLY_COOKIES') === 'true';
 
     // Generate JWT access token
     const payload = {
@@ -95,6 +101,37 @@ export class AuthService {
       this.parseExpiryToSeconds(refreshTokenExpiresIn),
     );
 
+    // Set httpOnly cookies if response object is provided
+    if (useCookies && response) {
+      const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+      const cookieDomain = this.configService.get<string>('COOKIE_DOMAIN');
+      
+      // Parse access token expiry (default 1 hour)
+      const accessTokenExpiresIn = this.configService.get<string>('JWT_EXPIRES_IN') || '1h';
+      const accessTokenMaxAge = this.parseExpiryToSeconds(accessTokenExpiresIn);
+      const refreshTokenMaxAge = this.parseExpiryToSeconds(refreshTokenExpiresIn);
+
+      // Set access token cookie
+      response.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: isProduction, // HTTPS only in production
+        sameSite: 'strict',
+        maxAge: accessTokenMaxAge * 1000, // Convert to milliseconds
+        path: '/',
+        ...(cookieDomain && { domain: cookieDomain }),
+      });
+
+      // Set refresh token cookie
+      response.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: isProduction, // HTTPS only in production
+        sameSite: 'strict',
+        maxAge: refreshTokenMaxAge * 1000, // Convert to milliseconds
+        path: '/',
+        ...(cookieDomain && { domain: cookieDomain }),
+      });
+    }
+
     this.loggingService.log(
       `User logged in: ${user.email}`,
       'AuthService',
@@ -104,6 +141,16 @@ export class AuthService {
       },
     );
 
+    // If using cookies, don't return tokens in response body
+    if (useCookies && response) {
+      return {
+        message: 'Login successful',
+        user: userWithoutPassword,
+        // Tokens are in httpOnly cookies, not in response body
+      };
+    }
+
+    // Return tokens in response body (legacy behavior)
     return {
       message: 'Login successful',
       user: userWithoutPassword,
@@ -333,7 +380,7 @@ export class AuthService {
   // USER LOGIN & LOGOUT
   // #########################################################
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, response?: any) {
     const { email, password } = loginDto;
 
     // Find user with security relation
@@ -404,7 +451,7 @@ export class AuthService {
     }
 
     // No 2FA - proceed with normal login and generate JWT tokens
-    return this.generateAuthResponse(user);
+    return this.generateAuthResponse(user, response);
   }
 
   /**
@@ -414,7 +461,7 @@ export class AuthService {
     email: string;
     code: string;
     tempToken: string;
-  }) {
+  }, response?: any) {
     const { email, code, tempToken } = verifyDto;
 
     // Retrieve pending login from Redis
@@ -480,10 +527,10 @@ export class AuthService {
     await this.redisService.del(pendingLoginKey);
 
     // Generate JWT tokens and return
-    return this.generateAuthResponse(user);
+    return this.generateAuthResponse(user, response);
   }
 
-  async logout(userId: string, refreshToken?: string) {
+  async logout(userId: string, refreshToken?: string, response?: any) {
     // If refresh token provided, blacklist it
     if (refreshToken) {
       const refreshTokenKey = this.redisService.keyBuilder.build(
@@ -493,6 +540,13 @@ export class AuthService {
         refreshToken.substring(refreshToken.length - 20),
       );
       await this.redisService.del(refreshTokenKey);
+    }
+
+    // Clear httpOnly cookies if using cookies
+    const useCookies = this.configService.get<string>('USE_HTTPONLY_COOKIES') === 'true';
+    if (useCookies && response) {
+      response.clearCookie('accessToken', { path: '/' });
+      response.clearCookie('refreshToken', { path: '/' });
     }
 
     // Optionally: Blacklist all tokens for this user (if implementing token revocation)
