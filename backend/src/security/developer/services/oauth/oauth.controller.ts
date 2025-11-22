@@ -28,7 +28,7 @@ import { CurrentUser } from '../../../auth/decorators/currentUser.decorator';
 import { User } from '../../../../rest/api/users/assets/entities/user.entity';
 import { Public } from '../../../auth/decorators/public.decorator';
 
-@ApiTags('OAuth')
+@ApiTags('Developer Management | OAuth')
 @Controller('oauth')
 @UseGuards(AuthGuard, AdminGuard)
 export class OAuthController {

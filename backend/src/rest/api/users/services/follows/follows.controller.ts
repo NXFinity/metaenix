@@ -26,6 +26,7 @@ import { Throttle } from '@throttle/throttle';
 import { AdminGuard } from 'src/security/auth/guards/admin.guard';
 import { Response } from 'express';
 import { RequireScope } from 'src/security/developer/services/scopes/decorators/require-scope.decorator';
+import { Public } from 'src/security/auth/decorators/public.decorator';
 
 @ApiTags('Account Management | Follows')
 @Controller('follows')
@@ -80,7 +81,8 @@ export class FollowsController {
   }
 
   @Get(':userId/following')
-  @RequireScope('read:follows')
+  @Public()
+  @RequireScope('read:follows') // Required for OAuth tokens accessing private data
   @ApiOperation({ summary: 'Get users that a user is following' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -108,28 +110,19 @@ export class FollowsController {
     status: 200,
     description: 'Following list retrieved successfully',
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   getFollowing(
-    @CurrentUser() user: User,
-    @Param('userId') userId: string,
-    @Query() paginationDto: PaginationDto & { search?: string },
+    @CurrentUser() user?: User,
+    @Param('userId') userId?: string,
+    @Query() paginationDto?: PaginationDto & { search?: string },
   ) {
     const currentUserId = user?.id;
-    if (!currentUserId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    // Users can only view their own following list
-    if (currentUserId !== userId) {
-      throw new UnauthorizedException(
-        'You can only view your own following list',
-      );
-    }
-    return this.followsService.getFollowing(userId, currentUserId, paginationDto);
+    return this.followsService.getFollowing(userId!, currentUserId, paginationDto || {});
   }
 
   @Get(':userId/followers')
-  @RequireScope('read:follows')
+  @Public()
+  @RequireScope('read:follows') // Required for OAuth tokens accessing private data
   @ApiOperation({ summary: 'Get followers of a user' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
@@ -157,21 +150,17 @@ export class FollowsController {
     status: 200,
     description: 'Followers list retrieved successfully',
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   getFollowers(
-    @CurrentUser() user: User,
-    @Param('userId') userId: string,
-    @Query() paginationDto: PaginationDto & { search?: string },
+    @CurrentUser() user?: User,
+    @Param('userId') userId?: string,
+    @Query() paginationDto?: PaginationDto & { search?: string },
   ) {
     const currentUserId = user?.id;
-    if (!currentUserId) {
-      throw new UnauthorizedException('User ID not found');
-    }
     return this.followsService.getFollowers(
-      userId,
+      userId!,
       currentUserId,
-      paginationDto,
+      paginationDto || {},
     );
   }
 

@@ -1,7 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, Unique } from 'typeorm';
 import { BaseEntity } from '@database/database';
 import { Post } from './post.entity';
-import { Comment } from './comment.entity';
+import { Comment } from 'src/services/comments/assets/entities/comment.entity';
 import { User } from '../../../../assets/entities/user.entity';
 
 @Entity('postReaction', { schema: 'social' })

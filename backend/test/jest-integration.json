@@ -1,0 +1,24 @@
+{
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".integration-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "moduleNameMapper": {
+    "^@caching/caching(|/.*)$": "<rootDir>/../libs/caching/src/$1",
+    "^@database/database(|/.*)$": "<rootDir>/../libs/database/src/$1",
+    "^@email/email(|/.*)$": "<rootDir>/../libs/email/src/$1",
+    "^@kafka/kafka(|/.*)$": "<rootDir>/../libs/kafka/src/$1",
+    "^@logging/logging(|/.*)$": "<rootDir>/../libs/logging/src/$1",
+    "^@redis/redis(|/.*)$": "<rootDir>/../libs/redis/src/$1",
+    "^@throttle/throttle(|/.*)$": "<rootDir>/../libs/throttle/src/$1",
+    "^src/(.*)$": "<rootDir>/../src/$1"
+  }
+}
+

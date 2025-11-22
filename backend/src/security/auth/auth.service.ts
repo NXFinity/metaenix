@@ -132,15 +132,6 @@ export class AuthService {
       });
     }
 
-    this.loggingService.log(
-      `User logged in: ${user.email}`,
-      'AuthService',
-      {
-        category: LogCategory.AUTHENTICATION,
-        metadata: { userId: user.id, email: user.email },
-      },
-    );
-
     // If using cookies, don't return tokens in response body
     if (useCookies && response) {
       return {

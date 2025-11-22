@@ -17,5 +17,17 @@ export interface AuthenticatedRequest extends Request {
     roles?: string[];
     websocketId?: string;
   };
+
+  /**
+   * Request ID (set by RequestIdMiddleware)
+   * Unique identifier for tracing requests across services and logs
+   */
+  requestId?: string;
+
+  /**
+   * Correlation ID (set by RequestIdMiddleware)
+   * Same as requestId, supports X-Correlation-Id header from clients
+   */
+  correlationId?: string;
 }
 

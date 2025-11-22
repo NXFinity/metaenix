@@ -169,12 +169,12 @@ export const TIME_SECONDS = {
 
 /**
  * Default image URLs for user profiles
- * These can be overridden via environment variables
+ * These must be set via environment variables
  */
 export const DEFAULT_PROFILE_IMAGES = {
-  AVATAR: process.env.DEFAULT_AVATAR_URL || 'https://i.postimg.cc/SxrVKbFk/hacker.png',
-  COVER: process.env.DEFAULT_COVER_URL || 'https://i.postimg.cc/k52jYYzB/cover-1.png',
-  BANNER: process.env.DEFAULT_BANNER_URL || 'https://i.postimg.cc/Y26dPWn8/cover.png',
-  OFFLINE: process.env.DEFAULT_OFFLINE_URL || 'https://i.postimg.cc/v8VzVVwF/offline.png',
+  AVATAR: process.env.DEFAULT_AVATAR_URL || '',
+  COVER: process.env.DEFAULT_COVER_URL || '',
+  BANNER: process.env.DEFAULT_BANNER_URL || '',
+  OFFLINE: process.env.DEFAULT_OFFLINE_URL || '',
 } as const;
 

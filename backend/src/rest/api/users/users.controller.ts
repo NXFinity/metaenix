@@ -5,7 +5,7 @@ import {
   Get,
   Param,
   Patch,
-  // Post, // Reserved for future use
+  Post,
   Query,
   Req,
   UnauthorizedException,
@@ -37,8 +37,8 @@ export class UsersController {
   // #########################################################
 
   // @Post()
-  // create(@Body() createUserDto: CreateUserDto) {
-  //   return this.usersService.create(createUserDto);
+  // upload(@Body() createUserDto: CreateUserDto) {
+  //   return this.usersService.upload(createUserDto);
   // }
 
   // #########################################################
@@ -593,5 +593,64 @@ export class UsersController {
   })
   deleteUser(@Param('id') id: string) {
     return this.usersService.delete(id);
+  }
+
+  // #########################################################
+  // VIEW TRACKING
+  // #########################################################
+
+  @Post(':id/view')
+  @Public()
+  @ApiOperation({
+    summary: 'Track profile view',
+    description: 'Increments the profile view count for a user and tracks geographic data. Public endpoint, silently fails on errors.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'User ID to track view for',
+    type: 'string',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile view tracked successfully',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found',
+  })
+  trackProfileView(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const viewerUserId = req.user?.id;
+    return this.usersService.trackProfileView(id, req, viewerUserId);
+  }
+
+  @Get(':id/analytics/geographic')
+  @RequireScope('read:analytics')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get geographic analytics',
+    description: 'Returns geographic analytics including top countries for profile views.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'User ID to get analytics for',
+    type: 'string',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Geographic analytics retrieved successfully',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - User can only view their own analytics',
+  })
+  async getGeographicAnalytics(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req.user?.id;
+    if (!userId || userId !== id) {
+      throw new UnauthorizedException('You can only view your own analytics');
+    }
+    return this.usersService.getGeographicAnalytics(id);
   }
 }

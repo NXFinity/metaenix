@@ -13,6 +13,7 @@ import { User } from './assets/entities/user.entity';
 import { Repository } from 'typeorm';
 import { Profile } from './assets/entities/profile.entity';
 import { Privacy } from './assets/entities/security/privacy.entity';
+import { Social } from './assets/entities/social.entity';
 import { ROLE } from '../../../security/roles';
 import { Security } from './assets/entities/security/security.entity';
 import { Follow } from './services/follows/assets/entities/follow.entity';
@@ -24,7 +25,9 @@ import {
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { CachingService } from '@caching/caching';
-// import { FollowsService } from './services/follows/follows.service'; // Reserved for future use
+import { FollowsService } from './services/follows/follows.service';
+import { TrackingService } from '../../../services/tracking/tracking.service';
+import { AnalyticsService } from '../../../services/analytics/analytics.service';
 
 @Injectable()
 export class UsersService {
@@ -39,7 +42,9 @@ export class UsersService {
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
     private readonly configService: ConfigService,
-    // private readonly followsService: FollowsService, // Reserved for future use
+    private readonly followsService: FollowsService,
+    private readonly trackingService: TrackingService,
+    private readonly analyticsService: AnalyticsService, // Centralized analytics service
   ) {}
 
   // #########################################################
@@ -92,6 +97,11 @@ export class UsersService {
       privacy.user = newUser;
       await manager.save(Privacy, privacy);
 
+      // Create Users Social
+      const social = new Social();
+      social.user = newUser;
+      await manager.save(Social, social);
+
       // Return User
       return newUser;
     });
@@ -128,21 +138,31 @@ export class UsersService {
       // Get system admin username to exclude from public view
       const systemUsername = this.configService.get<string>('SYSTEM_USERNAME') || 'systemadmin';
 
-      // Build base query for counting - only count public users, exclude systemadmin
+      // Build base query for counting - count public, follower-only, and subscriber-only users, exclude systemadmin
       const countQueryBuilder = this.userRepository
         .createQueryBuilder('user')
-        .where('user.isPublic = :isPublic', { isPublic: true })
-        .andWhere('user.username != :systemUsername', { systemUsername });
+        .leftJoin('user.privacy', 'privacy')
+        .where('user.username != :systemUsername', { systemUsername })
+        .andWhere(
+          '(user.isPublic = :isPublic OR privacy.isFollowerOnly = :isFollowerOnly OR privacy.isSubscriberOnly = :isSubscriberOnly)',
+          { isPublic: true, isFollowerOnly: true, isSubscriberOnly: true }
+        );
 
       // Get total count (before pagination)
       const total = await countQueryBuilder.getCount();
 
       // Build query for paginated results - only select safe fields, exclude systemadmin
+      // Include public profiles, follower-only profiles, and subscriber-only profiles
       const queryBuilder = this.userRepository
         .createQueryBuilder('user')
         .leftJoinAndSelect('user.profile', 'profile')
-        .where('user.isPublic = :isPublic', { isPublic: true })
-        .andWhere('user.username != :systemUsername', { systemUsername })
+        .leftJoinAndSelect('user.privacy', 'privacy')
+        .leftJoinAndSelect('user.social', 'social')
+        .where('user.username != :systemUsername', { systemUsername })
+        .andWhere(
+          '(user.isPublic = :isPublic OR privacy.isFollowerOnly = :isFollowerOnly OR privacy.isSubscriberOnly = :isSubscriberOnly)',
+          { isPublic: true, isFollowerOnly: true, isSubscriberOnly: true }
+        )
         .orderBy(`user.${safeSortBy}`, safeSortOrder)
         .select([
           'user.id',
@@ -156,6 +176,22 @@ export class UsersService {
           'profile.id',
           'profile.avatar',
           'profile.cover',
+          'privacy.id',
+          'privacy.isFollowerOnly',
+          'privacy.isSubscriberOnly',
+          'social.id',
+          'social.twitter',
+          'social.instagram',
+          'social.facebook',
+          'social.github',
+          'social.linkedin',
+          'social.youtube',
+          'social.tiktok',
+          'social.discord',
+          'social.twitch',
+          'social.snapchat',
+          'social.pinterest',
+          'social.reddit',
         ])
         .skip(skip)
         .take(limit);
@@ -251,6 +287,7 @@ export class UsersService {
           'user.isPublic',
           'privacy.id',
           'privacy.isFollowerOnly',
+          'privacy.isSubscriberOnly',
         ])
         .getOne();
 
@@ -261,16 +298,57 @@ export class UsersService {
       }
 
       // Check privacy settings early (before expensive queries)
-      const isPrivate = userCheck.isPublic === false || userCheck.privacy?.isFollowerOnly === true;
+      const isPrivate = userCheck.isPublic === false;
+      const isFollowerOnly = userCheck.privacy?.isFollowerOnly === true;
+      const isSubscriberOnly = userCheck.privacy?.isSubscriberOnly === true;
+      const hasPrivacyRestriction = isPrivate || isFollowerOnly || isSubscriberOnly;
       
-      if (isPrivate) {
+      if (hasPrivacyRestriction) {
         // If viewing own profile, allow access
         if (currentUserId && currentUserId === userCheck.id) {
           // Continue to full user fetch
         } else {
-          // Private profiles are only accessible to friends (not yet implemented)
-          // For now, only the owner can view their own private profile
-          throw new ForbiddenException('This profile is private. Only friends can view private profiles.');
+          // Check if user has access based on privacy settings
+          let hasAccess = false;
+          
+          if (isFollowerOnly && currentUserId) {
+            // Check if current user is following this user
+            try {
+              hasAccess = await this.followsService.isFollowing(currentUserId, userCheck.id);
+            } catch (error) {
+              // If check fails, assume no access
+              hasAccess = false;
+            }
+          } else if (isSubscriberOnly && currentUserId) {
+            // TODO: Check if current user is subscribed to this user
+            // Subscription service not yet implemented
+            hasAccess = false;
+          } else if (isPrivate && currentUserId) {
+            // TODO: Check if users are friends
+            // Friends service not yet implemented
+            hasAccess = false;
+          }
+          
+          if (!hasAccess) {
+            // Determine the appropriate error message based on privacy settings
+            let errorMessage = 'This profile is private. Only friends can view private profiles.';
+            if (isSubscriberOnly) {
+              errorMessage = 'This profile is only visible to subscribers.';
+            } else if (isFollowerOnly) {
+              errorMessage = 'This profile is only visible to followers.';
+            }
+            
+            // Include privacy information in the error response
+            throw new ForbiddenException({
+              message: errorMessage,
+              privacy: {
+                isFollowerOnly,
+                isSubscriberOnly,
+                isPrivate,
+              },
+            });
+          }
+          // If hasAccess is true, continue to full user fetch
         }
       }
 
@@ -283,6 +361,7 @@ export class UsersService {
             .createQueryBuilder('user')
             .leftJoinAndSelect('user.profile', 'profile')
             .leftJoinAndSelect('user.privacy', 'privacy')
+            .leftJoinAndSelect('user.social', 'social')
             .where('LOWER(user.username) = LOWER(:username)', { username })
             .select([
               'user.id',
@@ -292,6 +371,7 @@ export class UsersService {
               'user.isPublic',
               'user.followersCount',
               'user.followingCount',
+              'user.viewsCount',
               'user.isDeveloper',
               'user.developerTermsAcceptedAt',
               'user.dateCreated',
@@ -309,6 +389,20 @@ export class UsersService {
               'profile.dateOfBirth',
               'privacy.id',
               'privacy.isFollowerOnly',
+              'privacy.isSubscriberOnly',
+              'social.id',
+              'social.twitter',
+              'social.instagram',
+              'social.facebook',
+              'social.github',
+              'social.linkedin',
+              'social.youtube',
+              'social.tiktok',
+              'social.discord',
+              'social.twitch',
+              'social.snapchat',
+              'social.pinterest',
+              'social.reddit',
             ])
             .getOne();
 
@@ -494,6 +588,7 @@ export class UsersService {
           .createQueryBuilder('user')
           .leftJoinAndSelect('user.profile', 'profile')
           .leftJoinAndSelect('user.privacy', 'privacy')
+          .leftJoinAndSelect('user.social', 'social')
           .leftJoinAndSelect('user.security', 'security')
           .where('user.id = :id', { id: userId })
           .select([
@@ -504,6 +599,7 @@ export class UsersService {
             'user.isPublic',
             'user.followersCount',
             'user.followingCount',
+            'user.viewsCount',
             'user.isDeveloper',
             'user.developerTermsAcceptedAt',
             'user.dateCreated',
@@ -529,6 +625,19 @@ export class UsersService {
             'privacy.allowNotifications',
             'privacy.allowFriendRequests',
             'privacy.notifyOnFollow',
+            'social.id',
+            'social.twitter',
+            'social.instagram',
+            'social.facebook',
+            'social.github',
+            'social.linkedin',
+            'social.youtube',
+            'social.tiktok',
+            'social.discord',
+            'social.twitch',
+            'social.snapchat',
+            'social.pinterest',
+            'social.reddit',
             'security.id',
             'security.isVerified',
             'security.dateVerified',
@@ -982,10 +1091,55 @@ export class UsersService {
           await manager.save(Privacy, privacy);
         }
 
+        // Update Social entity if provided
+        if (updateUserDto.social) {
+          const social = userInTransaction.social || new Social();
+          social.user = userInTransaction;
+
+          if (updateUserDto.social.twitter !== undefined) {
+            social.twitter = updateUserDto.social.twitter;
+          }
+          if (updateUserDto.social.instagram !== undefined) {
+            social.instagram = updateUserDto.social.instagram;
+          }
+          if (updateUserDto.social.facebook !== undefined) {
+            social.facebook = updateUserDto.social.facebook;
+          }
+          if (updateUserDto.social.github !== undefined) {
+            social.github = updateUserDto.social.github;
+          }
+          if (updateUserDto.social.linkedin !== undefined) {
+            social.linkedin = updateUserDto.social.linkedin;
+          }
+          if (updateUserDto.social.youtube !== undefined) {
+            social.youtube = updateUserDto.social.youtube;
+          }
+          if (updateUserDto.social.tiktok !== undefined) {
+            social.tiktok = updateUserDto.social.tiktok;
+          }
+          if (updateUserDto.social.discord !== undefined) {
+            social.discord = updateUserDto.social.discord;
+          }
+          if (updateUserDto.social.twitch !== undefined) {
+            social.twitch = updateUserDto.social.twitch;
+          }
+          if (updateUserDto.social.snapchat !== undefined) {
+            social.snapchat = updateUserDto.social.snapchat;
+          }
+          if (updateUserDto.social.pinterest !== undefined) {
+            social.pinterest = updateUserDto.social.pinterest;
+          }
+          if (updateUserDto.social.reddit !== undefined) {
+            social.reddit = updateUserDto.social.reddit;
+          }
+
+          await manager.save(Social, social);
+        }
+
         // Return updated user with all relations (without password)
         const updatedUser = await manager.findOne(User, {
           where: { id },
-          relations: ['profile', 'privacy', 'security'],
+          relations: ['profile', 'privacy', 'social', 'security'],
         });
 
         if (!updatedUser) {
@@ -1090,5 +1244,65 @@ export class UsersService {
       );
       throw new InternalServerErrorException('Failed to delete user');
     }
+  }
+
+  // #########################################################
+  // VIEW TRACKING
+  // #########################################################
+
+  /**
+   * Track profile view (increment viewsCount and track geographic data)
+   */
+  async trackProfileView(userId: string, req: any, viewerUserId?: string): Promise<void> {
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        return; // Silently fail if user doesn't exist
+      }
+
+      // Only track if profile is public
+      if (!user.isPublic) {
+        return;
+      }
+
+      // Track view using centralized tracking service
+      const trackingResult = await this.trackingService.trackProfileView(userId, req, viewerUserId);
+
+      // Only recalculate analytics if view was actually tracked (not a duplicate)
+      if (trackingResult.tracked) {
+        this.analyticsService.calculateUserAnalytics(userId).catch((error: unknown) => {
+          this.loggingService.error(
+            'Error recalculating user analytics after view',
+            error instanceof Error ? error.stack : undefined,
+            'UsersService',
+          );
+        });
+      }
+
+      // Invalidate cache
+      await this.cachingService.invalidateUser(userId);
+    } catch (error) {
+      // Silently fail for view tracking
+      this.loggingService.error(
+        'Error tracking profile view',
+        error instanceof Error ? error.stack : undefined,
+        'UsersService',
+        {
+          category: LogCategory.DATABASE,
+          error: error instanceof Error ? error : new Error(String(error)),
+          metadata: { userId },
+        },
+      );
+    }
+  }
+
+  /**
+   * Get geographic analytics for a user
+   */
+  async getGeographicAnalytics(userId: string) {
+    return this.analyticsService.getGeographicAnalytics(userId);
   }
 }

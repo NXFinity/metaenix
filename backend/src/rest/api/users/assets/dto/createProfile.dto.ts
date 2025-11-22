@@ -44,7 +44,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
-  @MaxLength(50)
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   website?: string;
@@ -57,6 +57,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   avatar?: string;
@@ -64,6 +65,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   cover?: string;
@@ -71,6 +73,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   banner?: string;
@@ -78,6 +81,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   offline?: string;
@@ -85,6 +89,7 @@ export class CreateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @SanitizeUrl()
   chat?: string;
 }
@@ -121,7 +126,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
-  @MaxLength(50)
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   website?: string;
@@ -134,6 +139,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   avatar?: string;
@@ -141,6 +147,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   cover?: string;
@@ -148,6 +155,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   banner?: string;
@@ -155,6 +163,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @IsUrl()
   @SanitizeUrl()
   offline?: string;
@@ -162,6 +171,7 @@ export class UpdateProfileDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   @SanitizeUrl()
   chat?: string;
 }

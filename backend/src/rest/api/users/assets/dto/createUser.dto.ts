@@ -1,7 +1,8 @@
 // import { PartialType } from '@nestjs/swagger'; // Reserved for future use
 import { CreateProfileDto, UpdateProfileDto } from './createProfile.dto';
 import { CreatePrivacyDto, UpdatePrivacyDto } from './createPrivacy.dto';
-import { ROLE } from 'src/security/roles/assets/enum/role.enum';
+import { UpdateSocialDto } from './createSocial.dto';
+import { ROLE } from 'src/security/roles';
 import {
   IsOptional,
   IsString,
@@ -58,6 +59,10 @@ export class UpdateUserDto {
   @ApiProperty({ required: false })
   @IsOptional()
   privacy?: UpdatePrivacyDto;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  social?: UpdateSocialDto;
 
   // Explicitly exclude these fields - users cannot update:
   // - email (use separate email change process)

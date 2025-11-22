@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ScopeService } from './scope.service';
 import { Public } from '../../../auth/decorators/public.decorator';
 
-@ApiTags('OAuth')
+@ApiTags('Developer Management | Scopes')
 @Controller('oauth/scopes')
 export class ScopesController {
   constructor(private readonly scopeService: ScopeService) {}

@@ -36,15 +36,14 @@ export class ThrottleGuard implements CanActivate {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const response = context.switchToHttp().getResponse();
+
     // Check if route should skip throttling
     const skipThrottle = this.reflector.getAllAndOverride<boolean>(
       THROTTLE_SKIP_KEY,
       [context.getHandler(), context.getClass()],
     );
-
-    if (skipThrottle) {
-      return true;
-    }
 
     // Get throttle options from decorator
     const throttleOptions = this.reflector.getAllAndOverride<ThrottleOptions>(
@@ -56,11 +55,14 @@ export class ThrottleGuard implements CanActivate {
     const limit = throttleOptions?.limit || this.defaultLimit;
     const ttl = throttleOptions?.ttl || this.defaultTtl;
 
-    const request = context.switchToHttp().getRequest();
-    const response = context.switchToHttp().getResponse();
-
     // Check skip condition if provided
-    if (throttleOptions?.skipIf && throttleOptions.skipIf(request)) {
+    const shouldSkip = skipThrottle || (throttleOptions?.skipIf && throttleOptions.skipIf(request));
+
+    if (shouldSkip) {
+      // Even when skipping throttling, set rate limit headers for API consistency
+      response.setHeader('X-RateLimit-Limit', limit);
+      response.setHeader('X-RateLimit-Remaining', limit); // Full limit available when skipped
+      response.setHeader('X-RateLimit-Reset', new Date(Date.now() + ttl * 1000).toISOString());
       return true;
     }
 

@@ -8,7 +8,8 @@ import {
   Res,
   HttpException,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
+import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -33,11 +34,15 @@ import {
   VERIFICATION_TOKEN_EXPIRY_MINUTES,
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
 } from '../../common/constants/app.constants';
+import { doubleCsrf } from 'csrf-csrf';
 
 @ApiTags('Security Management | Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   // #########################################################
   // USER REGISTRATION
@@ -591,5 +596,79 @@ export class AuthController {
   })
   async resetPassword(@Body() resetDto: ResetDto) {
     return this.authService.resetPassword(resetDto);
+  }
+
+  // #########################################################
+  // CSRF TOKEN ENDPOINT
+  // #########################################################
+
+  @Public()
+  @Throttle({
+    limit: 100,
+    ttl: 60,
+  })
+  @Post('csrf-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get CSRF token',
+    description:
+      'Returns a CSRF token for use in state-changing operations. The token is also set in a cookie.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'CSRF token generated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        csrfToken: {
+          type: 'string',
+          example: 'abc123...',
+        },
+      },
+    },
+  })
+  async getCsrfToken(@Req() req: Request, @Res() res: Response) {
+    const secret = this.configService.get<string>('CSRF_SECRET') || 
+                   this.configService.get<string>('SESSION_SECRET');
+    
+    if (!secret) {
+      throw new HttpException(
+        'CSRF protection not configured',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    const csrfProtection = doubleCsrf({
+      getSecret: () => secret,
+      getSessionIdentifier: (req: Request) => {
+        // Use a combination of IP and user agent as session identifier
+        // In a real app, you might use session ID from express-session
+        return `${req.ip || 'unknown'}-${req.get('user-agent') || 'unknown'}`;
+      },
+      cookieName: 'csrf-token',
+      cookieOptions: {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: isProduction,
+        path: '/',
+      },
+      getCsrfTokenFromRequest: (req: Request) => {
+        return (
+          (req.headers['x-csrf-token'] as string) ||
+          (req.headers['x-xsrf-token'] as string) ||
+          (req.body?._csrf as string) ||
+          (req.query?._csrf as string) ||
+          null
+        );
+      },
+      size: 32,
+      ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
+    });
+
+    const token = csrfProtection.generateCsrfToken(req, res);
+    
+    return res.json({ csrfToken: token });
   }
 }

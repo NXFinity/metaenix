@@ -155,7 +155,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   // #########################################################
 
   /**
-   * Get or create producer
+   * Get or upload producer
    */
   private async getProducer(options?: KafkaProducerOptions): Promise<Producer> {
     if (!this.producer) {
@@ -185,14 +185,14 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   async sendMessage<T = any>(message: KafkaMessage<T>): Promise<KafkaMessageMetadata> {
     try {
       const producer = await this.getProducer();
-      
+
       const kafkaMessage: Message = {
-        key: message.key 
+        key: message.key
           ? (typeof message.key === 'string' ? Buffer.from(message.key) : message.key)
           : null,
         value: Buffer.from(
-          typeof message.value === 'string' 
-            ? message.value 
+          typeof message.value === 'string'
+            ? message.value
             : JSON.stringify(message.value)
         ),
         headers: message.headers ? this.convertHeaders(message.headers) : undefined,
@@ -228,12 +228,12 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       const producer = await this.getProducer();
 
       const kafkaMessages: Message[] = messages.map((message): Message => ({
-        key: message.key 
+        key: message.key
           ? (typeof message.key === 'string' ? Buffer.from(message.key) : message.key)
           : null,
         value: Buffer.from(
-          typeof message.value === 'string' 
-            ? message.value 
+          typeof message.value === 'string'
+            ? message.value
             : JSON.stringify(message.value)
         ),
         headers: message.headers ? this.convertHeaders(message.headers) : undefined,
@@ -297,12 +297,12 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       const producer = await this.getProducer({ transactionalId });
 
       const kafkaMessages: Message[] = messages.map((message): Message => ({
-        key: message.key 
+        key: message.key
           ? (typeof message.key === 'string' ? Buffer.from(message.key) : message.key)
           : null,
         value: Buffer.from(
-          typeof message.value === 'string' 
-            ? message.value 
+          typeof message.value === 'string'
+            ? message.value
             : JSON.stringify(message.value)
         ),
         headers: message.headers ? this.convertHeaders(message.headers) : undefined,
@@ -350,7 +350,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   // #########################################################
 
   /**
-   * Get or create consumer
+   * Get or upload consumer
    */
   private async getConsumer(
     groupId: string,

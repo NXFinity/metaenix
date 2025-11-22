@@ -22,6 +22,7 @@ import {
   PaginationResponse,
   PaginationMeta,
 } from 'src/common/interfaces/pagination-response.interface';
+import { AnalyticsService } from 'src/services/analytics/analytics.service';
 
 @Injectable()
 export class FollowsService {
@@ -36,6 +37,7 @@ export class FollowsService {
     private readonly redisService: RedisService,
     private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
   // #########################################################
@@ -54,8 +56,8 @@ export class FollowsService {
 
       // Check if already following (excluding soft-deleted follows)
       const existingFollow = await this.followRepository.findOne({
-        where: { 
-          followerId, 
+        where: {
+          followerId,
           followingId,
           dateDeleted: IsNull(),
         },
@@ -101,11 +103,21 @@ export class FollowsService {
 
       const savedFollow = await this.followRepository.save(follow);
 
-      // Update follower and following counts atomically
-      await Promise.all([
-        this.userRepository.increment({ id: followerId }, 'followingCount', 1),
-        this.userRepository.increment({ id: followingId }, 'followersCount', 1),
-      ]);
+      // Recalculate analytics for both users (in background)
+      this.analyticsService.calculateUserAnalytics(followerId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating user analytics after follow',
+          error instanceof Error ? error.stack : undefined,
+          'FollowsService',
+        );
+      });
+      this.analyticsService.calculateUserAnalytics(followingId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating user analytics after follow',
+          error instanceof Error ? error.stack : undefined,
+          'FollowsService',
+        );
+      });
 
       // Invalidate cache (including follow status and suggestions)
       await this.cachingService.invalidateByTags(
@@ -164,8 +176,8 @@ export class FollowsService {
   async unfollowUser(followerId: string, followingId: string): Promise<void> {
     try {
       const follow = await this.followRepository.findOne({
-        where: { 
-          followerId, 
+        where: {
+          followerId,
           followingId,
           dateDeleted: IsNull(),
         },
@@ -181,11 +193,21 @@ export class FollowsService {
       const cooldownKey = `follow:cooldown:${followerId}:${followingId}`;
       await this.redisService.set(cooldownKey, '1', FOLLOW_COOLDOWN_SECONDS);
 
-      // Update follower and following counts atomically
-      await Promise.all([
-        this.userRepository.decrement({ id: followerId }, 'followingCount', 1),
-        this.userRepository.decrement({ id: followingId }, 'followersCount', 1),
-      ]);
+      // Recalculate analytics for both users (in background)
+      this.analyticsService.calculateUserAnalytics(followerId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating user analytics after unfollow',
+          error instanceof Error ? error.stack : undefined,
+          'FollowsService',
+        );
+      });
+      this.analyticsService.calculateUserAnalytics(followingId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating user analytics after unfollow',
+          error instanceof Error ? error.stack : undefined,
+          'FollowsService',
+        );
+      });
 
       // Invalidate cache (including follow status and suggestions)
       await this.cachingService.invalidateByTags(
@@ -250,8 +272,8 @@ export class FollowsService {
       }
 
       const follow = await this.followRepository.findOne({
-        where: { 
-          followerId, 
+        where: {
+          followerId,
           followingId,
           dateDeleted: IsNull(),
         },
@@ -1075,20 +1097,20 @@ export class FollowsService {
       // Build growth arrays with all 30 days (including zeros)
       const growthData: Array<{ period: string; count: number }> = [];
       const followingGrowthData: Array<{ period: string; count: number }> = [];
-      
+
       for (let i = 29; i >= 0; i--) {
         const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
         date.setHours(0, 0, 0, 0);
         const dateKey = date.toISOString().split('T')[0];
         const periodLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        
-        growthData.push({ 
-          period: periodLabel, 
-          count: followersMap.get(dateKey) || 0 
+
+        growthData.push({
+          period: periodLabel,
+          count: followersMap.get(dateKey) || 0
         });
-        followingGrowthData.push({ 
-          period: periodLabel, 
-          count: followingMap.get(dateKey) || 0 
+        followingGrowthData.push({
+          period: periodLabel,
+          count: followingMap.get(dateKey) || 0
         });
       }
 
@@ -1435,7 +1457,7 @@ export class FollowsService {
         followers: number;
         following: number;
       }> = [];
-      
+
       for (let i = 29; i >= 0; i--) {
         const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
         date.setHours(0, 0, 0, 0);
@@ -1462,7 +1484,7 @@ export class FollowsService {
         weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
         weekStart.setHours(0, 0, 0, 0);
         const weekKey = weekStart.toISOString().split('T')[0];
-        
+
         const currentFollowers = followersWeeklyMap.get(weekKey) || 0;
         const currentFollowing = followingWeeklyMap.get(weekKey) || 0;
         followersWeeklyMap.set(weekKey, currentFollowers + trend.followers);
@@ -1475,7 +1497,7 @@ export class FollowsService {
         followers: number;
         following: number;
       }> = [];
-      
+
       for (let i = 11; i >= 0; i--) {
         const weekStart = new Date(now.getTime() - i * 7 * 24 * 60 * 60 * 1000);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
@@ -1514,7 +1536,7 @@ export class FollowsService {
         period: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         count: t.followers,
       }));
-      
+
       const followingGrowth = dailyTrends.map((t) => ({
         period: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         count: t.following,

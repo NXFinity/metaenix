@@ -4,6 +4,7 @@
 /build
 .env.development
 .env.production
+/docker
 # Logs
 logs
 *.log

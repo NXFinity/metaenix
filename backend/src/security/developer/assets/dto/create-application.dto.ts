@@ -27,9 +27,11 @@ export class CreateApplicationDto {
     description: 'Application description',
     example: 'A social media integration app',
     required: false,
+    maxLength: 1000,
   })
   @IsString()
   @IsOptional()
+  @MaxLength(1000, { message: 'Description cannot exceed 1000 characters' })
   description?: string;
 
   @ApiProperty({
@@ -56,33 +58,45 @@ export class CreateApplicationDto {
     description: 'Application icon URL',
     example: 'https://yourapp.com/icon.png',
     required: false,
+    maxLength: 500,
   })
+  @IsString()
   @IsUrl({ require_tld: false })
   @IsOptional()
+  @MaxLength(500, { message: 'Icon URL cannot exceed 500 characters' })
   iconUrl?: string;
 
   @ApiProperty({
     description: 'Application website URL',
     example: 'https://yourapp.com',
     required: true,
+    maxLength: 500,
   })
+  @IsString()
   @IsUrl({ require_tld: false })
+  @MaxLength(500, { message: 'Website URL cannot exceed 500 characters' })
   websiteUrl!: string;
 
   @ApiProperty({
     description: 'Privacy policy URL',
     example: 'https://yourapp.com/privacy',
     required: true,
+    maxLength: 500,
   })
+  @IsString()
   @IsUrl({ require_tld: false })
+  @MaxLength(500, { message: 'Privacy policy URL cannot exceed 500 characters' })
   privacyPolicyUrl!: string;
 
   @ApiProperty({
     description: 'Terms of service URL',
     example: 'https://yourapp.com/terms',
     required: true,
+    maxLength: 500,
   })
+  @IsString()
   @IsUrl({ require_tld: false })
+  @MaxLength(500, { message: 'Terms of service URL cannot exceed 500 characters' })
   termsOfServiceUrl!: string;
 
   @ApiProperty({
@@ -93,6 +107,7 @@ export class CreateApplicationDto {
   })
   @IsArray()
   @IsString({ each: true })
+  @MaxLength(100, { each: true, message: 'Each scope cannot exceed 100 characters' })
   @IsOptional()
   scopes?: string[];
 }

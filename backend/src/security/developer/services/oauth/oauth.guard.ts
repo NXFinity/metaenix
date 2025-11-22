@@ -28,7 +28,7 @@ export class OAuthGuard extends AuthGuard('oauth') {
     '/auth/change-password',
     '/twofa',
     '/users/register',
-    '/users/create',
+    '/users/upload',
     '/developer/register', // Developer registration should be via session
   ];
 

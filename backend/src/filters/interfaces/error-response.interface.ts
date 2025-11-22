@@ -24,6 +24,11 @@ export interface ErrorResponse {
   path: string;
 
   /**
+   * Request ID for tracing (set by RequestIdMiddleware)
+   */
+  requestId?: string;
+
+  /**
    * Error name (development only)
    */
   error?: string;

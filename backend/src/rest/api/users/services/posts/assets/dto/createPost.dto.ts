@@ -13,14 +13,17 @@ import {
 
 export class CreatePostDto {
   @ApiProperty({
-    description: 'Post content text',
+    description: 'Post content text (optional if media is provided)',
     example: 'This is my first post!',
     maxLength: 10000,
+    required: false,
   })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(10000, { message: 'Content cannot exceed 10000 characters' })
-  content!: string;
+  @ValidateIf((o) => !o.mediaUrl && (!o.mediaUrls || o.mediaUrls.length === 0) && !o.videoIds?.length)
+  @IsNotEmpty({ message: 'Content is required when no media is provided' })
+  content?: string;
 
   @ApiProperty({
     description: 'Single media URL (image/video)',
@@ -42,6 +45,17 @@ export class CreatePostDto {
   @IsArray()
   @IsUrl({}, { each: true })
   mediaUrls?: string[];
+
+  @ApiProperty({
+    description: 'Array of video IDs from user library to include in post',
+    example: ['uuid-video-1', 'uuid-video-2'],
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  videoIds?: string[];
 
   @ApiProperty({
     description: 'Link URL if post contains a link',
@@ -68,9 +82,11 @@ export class CreatePostDto {
     description: 'Link description',
     example: 'This article discusses...',
     required: false,
+    maxLength: 1000,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(1000, { message: 'Link description cannot exceed 1000 characters' })
   linkDescription?: string;
 
   @ApiProperty({
@@ -120,6 +136,7 @@ export class CreatePostDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(36, { message: 'Parent post ID cannot exceed 36 characters (UUID format)' })
   parentPostId?: string;
 
   @ApiProperty({
@@ -134,29 +151,6 @@ export class CreatePostDto {
 }
 
 export class UpdatePostDto extends PartialType(CreatePostDto) {}
-
-export class CreateCommentDto {
-  @ApiProperty({
-    description: 'Comment content',
-    example: 'Great post!',
-    maxLength: 5000,
-  })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(5000, { message: 'Comment cannot exceed 5000 characters' })
-  content!: string;
-
-  @ApiProperty({
-    description: 'ID of parent comment if this is a reply',
-    example: 'uuid-of-parent-comment',
-    required: false,
-  })
-  @IsOptional()
-  @IsString()
-  parentCommentId?: string;
-}
-
-export class UpdateCommentDto extends PartialType(CreateCommentDto) {}
 
 export class CreateShareDto {
   @ApiProperty({

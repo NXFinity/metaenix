@@ -246,7 +246,7 @@ export class DeveloperController {
   @ApiOperation({
     summary: 'Delete application',
     description:
-      'Delete an application. After deletion, you can create a new one (still limited to max 2 total).',
+      'Delete an application. After deletion, you can upload a new one (still limited to max 2 total).',
   })
   @ApiParam({ name: 'id', description: 'Application ID' })
   @ApiResponse({

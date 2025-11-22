@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { RedisService } from '@redis/redis';
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
@@ -186,6 +186,14 @@ export class CachingService {
         tags,
       );
     } catch (error) {
+      // NotFoundException is expected during cache warming when users don't exist yet
+      // Don't log it as an error, just rethrow it for the caller to handle gracefully
+      if (error instanceof NotFoundException) {
+        // Silently rethrow - the caller (e.g., StartupService) will handle it gracefully
+        throw error;
+      }
+
+      // For other errors, log as error
       this.loggingService.error(
         `Error in getOrSetUser: ${lookupType}=${identifier}`,
         error instanceof Error ? error.stack : undefined,

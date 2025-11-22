@@ -1,13 +1,14 @@
 import { Column, Entity, Index, OneToOne, OneToMany } from 'typeorm';
 import { BaseEntity } from '@database/database';
-import { ROLE } from 'src/security/roles/assets/enum/role.enum';
+import { ROLE } from 'src/security/roles';
 import { Profile } from './profile.entity';
 import { Privacy } from './security/privacy.entity';
 import { Security } from './security/security.entity';
+import { Social } from './social.entity';
 import { Post } from '../../services/posts/assets/entities/post.entity';
-import { Comment } from '../../services/posts/assets/entities/comment.entity';
-import { Like } from '../../services/posts/assets/entities/like.entity';
-import { Share } from '../../services/posts/assets/entities/share.entity';
+import { Comment } from 'src/services/comments/assets/entities/comment.entity';
+import { Like } from 'src/services/likes/assets/entities/like.entity';
+import { Share } from 'src/services/shares/assets/entities/share.entity';
 
 @Entity('user', { schema: 'account' })
 @Index(['websocketId'])
@@ -45,6 +46,10 @@ export class User extends BaseEntity {
   @OneToOne(() => Privacy, (privacy) => privacy.user, { onDelete: 'CASCADE' })
   privacy!: Privacy;
   // #########################################################
+  // Connected to Social Entity
+  @OneToOne(() => Social, (social) => social.user, { onDelete: 'CASCADE' })
+  social!: Social;
+  // #########################################################
   // Account Security
   @OneToOne(() => Security, (security) => security.user, {
     onDelete: 'CASCADE',
@@ -71,6 +76,10 @@ export class User extends BaseEntity {
 
   @Column({ type: 'int', default: 0 })
   followingCount!: number;
+
+  // Profile analytics
+  @Column({ type: 'int', default: 0 })
+  viewsCount!: number; // Total profile views
 
   // #########################################################
   // Developer fields

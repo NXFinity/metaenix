@@ -8,9 +8,6 @@ import {
   ManyToMany,
 } from 'typeorm';
 import { BaseEntity } from '@database/database';
-import { Comment } from './comment.entity';
-import { Like } from './like.entity';
-import { Share } from './share.entity';
 import { Bookmark } from './bookmark.entity';
 import { Report } from './report.entity';
 import { Reaction } from './reaction.entity';
@@ -125,17 +122,9 @@ export class Post extends BaseEntity {
   @OneToMany(() => Post, (post) => post.parentPost, { cascade: true })
   replies!: Post[];
 
-  // Comments on this post
-  @OneToMany(() => Comment, (comment) => comment.post, { cascade: true })
-  comments!: Comment[];
-
-  // Likes on this post
-  @OneToMany(() => Like, (like) => like.post, { cascade: true })
-  likes!: Like[];
-
-  // Shares of this post
-  @OneToMany(() => Share, (share) => share.post, { cascade: true })
-  shares!: Share[];
+  // Note: Comments, Likes, and Shares are now handled by universal services
+  // They use resourceType='post' and resourceId=post.id instead of direct foreign keys
+  // Relationships are removed as they're no longer valid with the universal entities
 
   // Bookmarks of this post
   @OneToMany(() => Bookmark, (bookmark) => bookmark.post, { cascade: true })

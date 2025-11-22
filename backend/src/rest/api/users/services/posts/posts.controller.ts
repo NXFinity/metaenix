@@ -7,21 +7,26 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UnauthorizedException,
-  BadRequestException,
   UseInterceptors,
   UploadedFiles,
-  // Req, // Reserved for future use
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { PostsService } from './posts.service';
+import { CommentsService } from 'src/services/comments/comments.service';
+import { LikesService } from 'src/services/likes/likes.service';
+import { SharesService } from 'src/services/shares/shares.service';
 import {
   CreatePostDto,
   UpdatePostDto,
-  CreateCommentDto,
-  UpdateCommentDto,
   CreateShareDto,
 } from './assets/dto/createPost.dto';
+import { CreateCommentDto } from 'src/services/comments/assets/dto/create-comment.dto';
+import { UpdateCommentDto } from 'src/services/comments/assets/dto/update-comment.dto';
+import { CommentResourceType } from 'src/services/comments/assets/enum/resource-type.enum';
+import { LikeResourceType } from 'src/services/likes/assets/enum/resource-type.enum';
+import { ShareResourceType } from 'src/services/shares/assets/enum/resource-type.enum';
 import {
   BookmarkPostDto,
   ReportPostDto,
@@ -42,7 +47,9 @@ import {
 import { CurrentUser } from 'src/security/auth/decorators/currentUser.decorator';
 import { User } from '../../assets/entities/user.entity';
 import { Public } from 'src/security/auth/decorators/public.decorator';
+import { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
+import { SearchQueryDto } from 'src/common/dto/search-query.dto';
 import { Throttle } from '@throttle/throttle';
 import { memoryStorage } from 'multer';
 import { RequireScope } from 'src/security/developer/services/scopes/decorators/require-scope.decorator';
@@ -51,7 +58,12 @@ import { RequireScope } from 'src/security/developer/services/scopes/decorators/
 @Controller('posts')
 @ApiBearerAuth()
 export class PostsController {
-  constructor(private readonly postsService: PostsService) {}
+  constructor(
+    private readonly postsService: PostsService,
+    private readonly commentsService: CommentsService,
+    private readonly likesService: LikesService,
+    private readonly sharesService: SharesService,
+  ) {}
 
   // #########################################################
   // CREATE OPTIONS
@@ -88,7 +100,8 @@ export class PostsController {
       {
         storage: memoryStorage(),
         limits: {
-          fileSize: 100 * 1024 * 1024, // 100MB max per file
+          fileSize: 600 * 1024 * 1024, // 600MB max per file (increased for large videos)
+          fieldSize: 10 * 1024 * 1024, // 10MB max for other fields (content, etc.)
         },
       },
     ),
@@ -97,7 +110,7 @@ export class PostsController {
   @ApiOperation({
     summary: 'Create a post with uploaded files',
     description:
-      'Upload images, videos, GIFs, and safe document formats (PDF, Word, Excel, text files) to create a post. Supports up to 10 media files and 5 document files.',
+      'Upload images, videos, GIFs, and safe document formats (PDF, Word, Excel, text files) to upload a post. Supports up to 10 media files and 5 document files.',
   })
   @ApiBody({
     schema: {
@@ -162,24 +175,40 @@ export class PostsController {
     @Body('isPublic') isPublic?: boolean,
     @Body('allowComments') allowComments?: boolean,
     @Body('parentPostId') parentPostId?: string,
+    @Body('videoIds') videoIds?: string | string[],
   ) {
     const userId = user?.id;
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    if (!content || content.trim().length === 0) {
-      throw new UnauthorizedException('Content is required');
+    // Allow empty content if files are provided
+    const hasFiles = files?.files && files.files.length > 0;
+
+    // Normalize videoIds to array (FormData can send as string or array)
+    let videoIdsArray: string[] | undefined;
+    if (videoIds) {
+      if (Array.isArray(videoIds)) {
+        videoIdsArray = videoIds.filter(id => id && typeof id === 'string');
+      } else if (typeof videoIds === 'string' && videoIds.trim()) {
+        videoIdsArray = [videoIds];
+      }
+    }
+
+    const hasVideos = videoIdsArray && videoIdsArray.length > 0;
+    if ((!content || content.trim().length === 0) && !hasFiles && !hasVideos) {
+      throw new UnauthorizedException('Content is required when no media files are provided');
     }
 
     return this.postsService.createPostWithFiles(
       userId,
-      content,
+      content || '', // Provide empty string if content is undefined
       files?.files || [],
       files?.documents || [],
       {
         isPublic: isPublic !== undefined ? isPublic : true,
         allowComments: allowComments !== undefined ? allowComments : true,
         parentPostId,
+        videoIds: videoIdsArray,
       },
     );
   }
@@ -207,7 +236,12 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.createComment(userId, postId, createCommentDto);
+    return this.commentsService.createComment(
+      userId,
+      CommentResourceType.POST,
+      postId,
+      createCommentDto,
+    );
   }
 
   @Post(':postId/like')
@@ -226,7 +260,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    await this.postsService.likePostOrComment(userId, postId);
+    await this.likesService.likeResource(userId, LikeResourceType.POST, postId);
     return { message: 'Post liked successfully', liked: true };
   }
 
@@ -245,7 +279,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    await this.postsService.unlikePostOrComment(userId, postId);
+    await this.likesService.unlikeResource(userId, LikeResourceType.POST, postId);
     return { message: 'Post unliked successfully', liked: false };
   }
 
@@ -270,7 +304,12 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.sharePost(userId, postId, createShareDto);
+    return this.sharesService.shareResource(
+      userId,
+      ShareResourceType.POST,
+      postId,
+      createShareDto,
+    );
   }
 
   // #########################################################
@@ -336,7 +375,8 @@ export class PostsController {
   }
 
   @Get('user/:userId')
-  @RequireScope('read:posts')
+  @Public()
+  @RequireScope('read:posts') // Required for OAuth tokens accessing private posts
   @ApiOperation({ summary: 'Get posts by user ID' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -347,12 +387,11 @@ export class PostsController {
     status: 200,
     description: 'User posts retrieved successfully',
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   findByUserId(
     @Param('userId') targetUserId: string,
     @Query() paginationDto: PaginationDto,
-    @CurrentUser() user: User,
+    @CurrentUser() user?: User,
   ) {
     const userId = user?.id;
     return this.postsService.findByUserId(targetUserId, paginationDto, userId);
@@ -425,23 +464,16 @@ export class PostsController {
   @Public()
   @RequireScope('read:posts') // Required for OAuth tokens searching posts
   @ApiOperation({ summary: 'Search posts by content, hashtags, or mentions' })
-  @ApiQuery({ name: 'q', description: 'Search query', required: true })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({
     status: 200,
     description: 'Search results retrieved successfully',
   })
   searchPosts(
-    @Query('q') query: string,
-    @Query() paginationDto: PaginationDto,
+    @Query() searchQueryDto: SearchQueryDto,
     @CurrentUser() user?: any,
   ) {
     const userId = user?.id;
-    if (!query || query.trim().length === 0) {
-      throw new BadRequestException('Search query is required');
-    }
-    return this.postsService.searchPosts(query, paginationDto, userId);
+    return this.postsService.searchPosts(searchQueryDto.q, searchQueryDto, userId);
   }
 
   @Get('filter/:type')
@@ -520,9 +552,9 @@ export class PostsController {
     description: 'Post view tracked successfully',
   })
   @ApiResponse({ status: 404, description: 'Post not found' })
-  trackPostView(@Param('postId') postId: string, @CurrentUser() user?: any) {
+  trackPostView(@Param('postId') postId: string, @Req() req: AuthenticatedRequest, @CurrentUser() user?: any) {
     const userId = user?.id;
-    return this.postsService.trackPostView(postId, userId);
+    return this.postsService.trackPostView(postId, req, userId);
   }
 
   @Get(':postId')
@@ -549,12 +581,8 @@ export class PostsController {
     description: 'Comment retrieved successfully',
   })
   @ApiResponse({ status: 404, description: 'Comment not found' })
-  findCommentById(
-    @Param('commentId') commentId: string,
-    @CurrentUser() user?: any,
-  ) {
-    const userId = user?.id;
-    return this.postsService.findCommentById(commentId, userId);
+  findCommentById(@Param('commentId') commentId: string) {
+    return this.commentsService.getCommentById(commentId);
   }
 
   @Get('comments/:commentId/replies')
@@ -570,21 +598,15 @@ export class PostsController {
     description: 'Comment replies retrieved successfully',
   })
   @ApiResponse({ status: 404, description: 'Comment not found' })
-  findRepliesByCommentId(
-    @Param('commentId') commentId: string,
-    @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: any,
-  ) {
-    const userId = user?.id;
-    return this.postsService.findRepliesByCommentId(
-      commentId,
-      paginationDto,
-      userId,
-    );
+  findRepliesByCommentId(@Param('commentId') commentId: string) {
+    // Replies are already included in getCommentById, but we can return them separately if needed
+    // For now, just return the comment which includes its replies
+    return this.commentsService.getCommentById(commentId);
   }
 
   @Get(':postId/comments')
-  @RequireScope('read:comments')
+  @Public()
+  @RequireScope('read:comments') // Required for OAuth tokens accessing private post comments
   @ApiOperation({ summary: 'Get comments for a post' })
   @ApiParam({ name: 'postId', description: 'Post ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -595,17 +617,16 @@ export class PostsController {
     status: 200,
     description: 'Comments retrieved successfully',
   })
+  @ApiResponse({ status: 403, description: 'Forbidden - Post is private' })
   @ApiResponse({ status: 404, description: 'Post not found' })
   findCommentsByPostId(
     @Param('postId') postId: string,
     @Query() paginationDto: PaginationDto,
-    @CurrentUser() user?: any,
   ) {
-    const userId = user?.id;
-    return this.postsService.findCommentsByPostId(
+    return this.commentsService.getComments(
+      CommentResourceType.POST,
       postId,
       paginationDto,
-      userId,
     );
   }
 
@@ -625,7 +646,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.likePostOrComment(userId, undefined, commentId);
+    return this.likesService.likeResource(userId, LikeResourceType.COMMENT, commentId);
   }
 
   @Delete('comments/:commentId/like')
@@ -646,7 +667,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.unlikePostOrComment(userId, undefined, commentId);
+    return this.likesService.unlikeResource(userId, LikeResourceType.COMMENT, commentId);
   }
 
   // #########################################################
@@ -733,7 +754,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.updateComment(userId, commentId, updateCommentDto);
+    return this.commentsService.updateComment(userId, commentId, updateCommentDto);
   }
 
   // #########################################################
@@ -778,7 +799,7 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.deleteComment(userId, commentId);
+    return this.commentsService.deleteComment(userId, commentId);
   }
 
   // #########################################################

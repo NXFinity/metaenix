@@ -47,7 +47,7 @@ export class TwofaService {
     private readonly auditLogService: AuditLogService,
     private readonly redisService: RedisService,
   ) {
-    // Use JWT_SECRET as encryption key (or create dedicated key)
+    // Use JWT_SECRET as encryption key (or upload dedicated key)
     const key = this.configService.get<string>('JWT_SECRET');
     if (!key || key.length < 32) {
       throw new Error(

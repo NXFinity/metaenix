@@ -50,7 +50,7 @@ export class SeedService implements OnModuleInit {
 
   async onModuleInit() {
     const nodeEnv = this.configService.get<string>('NODE_ENV');
-    
+
     // Only run seeding in development environment
     if (nodeEnv !== 'development') {
       this.logger.debug(`SeedService skipped - NODE_ENV is '${nodeEnv}', only runs in 'development'`);
@@ -58,7 +58,7 @@ export class SeedService implements OnModuleInit {
     }
 
     this.logger.log('SeedService initialized - will seed database in development mode');
-    
+
     // Wait for database to be ready
     setTimeout(async () => {
       await this.seed();
@@ -71,7 +71,7 @@ export class SeedService implements OnModuleInit {
    */
   async seed(): Promise<void> {
     const nodeEnv = this.configService.get<string>('NODE_ENV');
-    
+
     // Double-check environment - safety guard
     if (nodeEnv !== 'development') {
       this.logger.warn(`SeedService.seed() called in non-development environment (NODE_ENV: ${nodeEnv}). Skipping.`);
@@ -152,7 +152,7 @@ export class SeedService implements OnModuleInit {
 
         await userRepository.save(existingUser);
 
-        // Update or create related entities
+        // Update or upload related entities
         await this.ensureRelatedEntities(existingUser);
 
         this.logger.log(
@@ -294,7 +294,7 @@ export class SeedService implements OnModuleInit {
 
         await userRepository.save(existingUser);
 
-        // Update or create related entities
+        // Update or upload related entities
         await this.ensureRelatedEntities(existingUser);
 
         this.logger.debug(`User updated: ${seedUser.username}`);
@@ -380,7 +380,7 @@ export class SeedService implements OnModuleInit {
   }
 
   /**
-   * Ensure related entities exist for a user (update or create)
+   * Ensure related entities exist for a user (update or upload)
    * This method ensures that when new entities are added to the system,
    * existing seeded users get updated with those entities
    */

@@ -7,11 +7,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Post } from './assets/entities/post.entity';
-import { Comment } from './assets/entities/comment.entity';
-import { Like } from './assets/entities/like.entity';
-import { Share } from './assets/entities/share.entity';
+import { Like } from 'src/services/likes/assets/entities/like.entity';
+import { Share } from 'src/services/shares/assets/entities/share.entity';
 import { Bookmark } from './assets/entities/bookmark.entity';
 import { Report } from './assets/entities/report.entity';
 import { Reaction } from './assets/entities/reaction.entity';
@@ -21,9 +19,6 @@ import { Follow } from '../follows/assets/entities/follow.entity';
 import {
   CreatePostDto,
   UpdatePostDto,
-  CreateCommentDto,
-  UpdateCommentDto,
-  CreateShareDto,
 } from './assets/dto/createPost.dto';
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
@@ -36,14 +31,19 @@ import {
   PaginationMeta,
   PaginationResponse,
 } from 'src/common/interfaces/pagination-response.interface';
+import { VideosService } from '../videos/videos.service';
+import { Video } from '../videos/assets/entities/video.entity';
+import { TrackingService } from 'src/services/tracking/tracking.service';
+import { AnalyticsService } from 'src/services/analytics/analytics.service';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+import { IsNull } from 'typeorm';
 
 @Injectable()
 export class PostsService {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
-    @InjectRepository(Comment)
-    private readonly commentRepository: Repository<Comment>,
     @InjectRepository(Like)
     private readonly likeRepository: Repository<Like>,
     @InjectRepository(Share)
@@ -64,7 +64,10 @@ export class PostsService {
     private readonly cachingService: CachingService,
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly videosService: VideosService,
+    private readonly trackingService: TrackingService,
+    private readonly analyticsService: AnalyticsService,
+    private readonly httpService: HttpService,
   ) {}
 
   // #########################################################
@@ -89,6 +92,73 @@ export class PostsService {
     const matches = content.match(mentionRegex);
     if (!matches) return [];
     return [...new Set(matches.map((mention) => mention.substring(1).toLowerCase()))];
+  }
+
+  /**
+   * Extract link metadata (title, description, image) from a URL
+   * Uses Open Graph tags, Twitter Cards, or fallback to HTML meta tags
+   */
+  private async extractLinkMetadata(url: string): Promise<{
+    title: string | null;
+    description: string | null;
+    image: string | null;
+  } | null> {
+    try {
+      // Fetch the URL with a timeout
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          timeout: 5000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; LinkPreviewBot/1.0)',
+          },
+          maxRedirects: 5,
+        }),
+      );
+
+      const html = response.data;
+      if (typeof html !== 'string') {
+        return null;
+      }
+
+      // Extract metadata using regex (simple approach)
+      // In production, you might want to use cheerio or puppeteer for better parsing
+      const titleMatch =
+        html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+name=["']twitter:title["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<title>([^<]+)<\/title>/i);
+      const title = titleMatch ? titleMatch[1].trim() : null;
+
+      const descriptionMatch =
+        html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+name=["']twitter:description["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+name=["']description["']\s+content=["']([^"']+)["']/i);
+      const description = descriptionMatch ? descriptionMatch[1].trim() : null;
+
+      const imageMatch =
+        html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+name=["']twitter:image["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+property=["']og:image:secure_url["']\s+content=["']([^"']+)["']/i);
+      let image = imageMatch ? imageMatch[1].trim() : null;
+
+      // Resolve relative image URLs
+      if (image && !image.startsWith('http')) {
+        try {
+          const baseUrl = new URL(url);
+          image = new URL(image, baseUrl.origin).href;
+        } catch {
+          image = null;
+        }
+      }
+
+      return {
+        title: title && title.length > 0 ? title.substring(0, 200) : null,
+        description: description && description.length > 0 ? description.substring(0, 500) : null,
+        image: image && image.length > 0 ? image.substring(0, 500) : null,
+      };
+    } catch (error) {
+      // Silently fail - return null so link preview still works with just URL
+      return null;
+    }
   }
 
   /**
@@ -179,26 +249,95 @@ export class PostsService {
         throw new NotFoundException('User not found');
       }
 
+      // Handle video IDs from user library (batch fetch to avoid N+1)
+      let videoUrls: string[] = [];
+      if (createPostDto.videoIds && createPostDto.videoIds.length > 0) {
+        // Batch fetch all videos in a single query
+        const videoRepository = this.dataSource.getRepository(Video);
+        const videos = await videoRepository.find({
+          where: {
+            id: In(createPostDto.videoIds),
+            userId,
+            dateDeleted: IsNull(),
+          },
+        });
+
+        // Validate all videos exist and belong to user
+        const foundVideoIds = new Set(videos.map((v) => v.id));
+        const missingVideoIds = createPostDto.videoIds.filter(
+          (id) => !foundVideoIds.has(id),
+        );
+        if (missingVideoIds.length > 0) {
+          throw new BadRequestException(
+            `Videos not found: ${missingVideoIds.join(', ')}`,
+              );
+            }
+
+        // Extract video URLs from ready videos
+        for (const video of videos) {
+            if (video.status === 'ready' && video.videoUrl) {
+              videoUrls.push(video.videoUrl);
+            }
+        }
+      }
+
+      // Validate that either content or media is provided
+      const hasContent = createPostDto.content && createPostDto.content.trim().length > 0;
+      const hasMedia = createPostDto.mediaUrl ||
+                      (createPostDto.mediaUrls && createPostDto.mediaUrls.length > 0) ||
+                      (createPostDto.videoIds && createPostDto.videoIds.length > 0);
+
+      if (!hasContent && !hasMedia) {
+        throw new BadRequestException('Post must have either content or media');
+      }
+
       // Sanitize input content and URLs
-      const sanitizedContent = sanitizeText(createPostDto.content);
+      const sanitizedContent = createPostDto.content ? sanitizeText(createPostDto.content) : '';
       const sanitizedMediaUrl = createPostDto.mediaUrl
         ? sanitizeUrl(createPostDto.mediaUrl)
         : null;
-      const sanitizedMediaUrls = createPostDto.mediaUrls
-        ? createPostDto.mediaUrls.map((url) => sanitizeUrl(url))
-        : [];
+      const sanitizedMediaUrls = [
+        ...(createPostDto.mediaUrls
+          ? createPostDto.mediaUrls.map((url) => sanitizeUrl(url))
+          : []),
+        ...videoUrls.map((url) => sanitizeUrl(url)),
+      ];
       const sanitizedLinkUrl = createPostDto.linkUrl
         ? sanitizeUrl(createPostDto.linkUrl)
         : null;
-      const sanitizedLinkTitle = createPostDto.linkTitle
+
+      // If linkUrl is provided but metadata is missing, try to extract it
+      let sanitizedLinkTitle = createPostDto.linkTitle
         ? sanitizeText(createPostDto.linkTitle)
         : null;
-      const sanitizedLinkDescription = createPostDto.linkDescription
+      let sanitizedLinkDescription = createPostDto.linkDescription
         ? sanitizeText(createPostDto.linkDescription)
         : null;
-      const sanitizedLinkImage = createPostDto.linkImage
+      let sanitizedLinkImage = createPostDto.linkImage
         ? sanitizeUrl(createPostDto.linkImage)
         : null;
+
+      // Extract link metadata if URL is provided but metadata is missing
+      if (sanitizedLinkUrl && !sanitizedLinkTitle && !sanitizedLinkDescription && !sanitizedLinkImage) {
+        try {
+          const linkMetadata = await this.extractLinkMetadata(sanitizedLinkUrl);
+          if (linkMetadata) {
+            sanitizedLinkTitle = linkMetadata.title || null;
+            sanitizedLinkDescription = linkMetadata.description || null;
+            sanitizedLinkImage = linkMetadata.image || null;
+          }
+        } catch (error) {
+          // Silently fail - link preview will still work with just the URL
+          this.loggingService.debug(
+            'Failed to extract link metadata',
+            'PostsService',
+            {
+              category: LogCategory.API,
+              metadata: { url: sanitizedLinkUrl, error: error instanceof Error ? error.message : String(error) },
+            },
+          );
+        }
+      }
 
       // Extract hashtags and mentions
       const hashtags = this.extractHashtags(sanitizedContent);
@@ -270,7 +409,7 @@ export class PostsService {
         },
       );
 
-      throw new InternalServerErrorException('Failed to create post');
+      throw new InternalServerErrorException('Failed to upload post');
     }
   }
 
@@ -286,6 +425,7 @@ export class PostsService {
       isPublic?: boolean;
       allowComments?: boolean;
       parentPostId?: string;
+      videoIds?: string[];
     },
   ): Promise<Post> {
     try {
@@ -307,8 +447,49 @@ export class PostsService {
         throw new NotFoundException('User not found');
       }
 
-      // Sanitize content
-      const sanitizedContent = sanitizeText(content);
+      // Handle video IDs from user library (if provided) - batch fetch to avoid N+1
+      let videoUrls: string[] = [];
+      if (options?.videoIds && options.videoIds.length > 0) {
+        // Batch fetch all videos in a single query
+        const videoRepository = this.dataSource.getRepository(Video);
+        const videos = await videoRepository.find({
+          where: {
+            id: In(options.videoIds),
+            userId,
+            dateDeleted: IsNull(),
+          },
+        });
+
+        // Validate all videos exist and belong to user
+        const foundVideoIds = new Set(videos.map((v) => v.id));
+        const missingVideoIds = options.videoIds.filter(
+          (id) => !foundVideoIds.has(id),
+        );
+        if (missingVideoIds.length > 0) {
+          throw new BadRequestException(
+            `Videos not found: ${missingVideoIds.join(', ')}`,
+              );
+            }
+
+        // Extract video URLs from ready videos
+        for (const video of videos) {
+            if (video.status === 'ready' && video.videoUrl) {
+              videoUrls.push(video.videoUrl);
+            }
+        }
+      }
+
+      // Validate that either content, files, or videos are provided
+      const hasContent = content && content.trim().length > 0;
+      const hasFiles = files && files.length > 0;
+      const hasVideos = videoUrls.length > 0;
+
+      if (!hasContent && !hasFiles && !hasVideos) {
+        throw new BadRequestException('Post must have either content, media files, or videos');
+      }
+
+      // Sanitize content (can be empty if files are provided)
+      const sanitizedContent = content ? sanitizeText(content) : '';
 
       // Extract hashtags and mentions
       const hashtags = this.extractHashtags(sanitizedContent);
@@ -345,6 +526,8 @@ export class PostsService {
       try {
         // Upload media files (images, videos, GIFs)
         if (files && files.length > 0) {
+          const videoMimeTypes = ['video/mp4', 'video/webm', 'video/quicktime'];
+
           for (const file of files) {
             const uploadResult = await this.storageService.uploadFile(
               userId,
@@ -354,6 +537,37 @@ export class PostsService {
             );
             uploadedMediaUrls.push(uploadResult.url);
             uploadedFileKeys.push(uploadResult.key);
+
+            // If this is a video file, also add it to user's video library
+            // Note: Thumbnail will be uploaded by frontend after post creation
+            if (videoMimeTypes.includes(file.mimetype)) {
+              try {
+                await this.videosService.createVideoFromUploadedFile(
+                  userId,
+                  uploadResult.url,
+                  uploadResult.key,
+                  uploadResult.mimeType,
+                  uploadResult.size,
+                  `Video from post - ${new Date().toLocaleDateString()}`,
+                );
+              } catch (videoError) {
+                // Log but don't fail post creation if video library creation fails
+                this.loggingService.error(
+                  'Failed to add video to user library',
+                  videoError instanceof Error ? videoError.stack : undefined,
+                  'PostsService',
+                  {
+                    category: LogCategory.DATABASE,
+                    userId,
+                    error:
+                      videoError instanceof Error
+                        ? videoError
+                        : new Error(String(videoError)),
+                    metadata: { videoUrl: uploadResult.url },
+                  },
+                );
+              }
+            }
           }
         }
 
@@ -370,8 +584,8 @@ export class PostsService {
           }
         }
 
-        // Combine all uploaded URLs
-        const allMediaUrls = [...uploadedMediaUrls, ...uploadedDocumentUrls];
+        // Combine all uploaded URLs with video URLs from videoIds
+        const allMediaUrls = [...uploadedMediaUrls, ...uploadedDocumentUrls, ...videoUrls];
 
         // Update post with file URLs and determine post type
         savedPost.mediaUrl = allMediaUrls.length > 0 ? allMediaUrls[0] : null;
@@ -449,502 +663,7 @@ export class PostsService {
         },
       );
 
-      throw new InternalServerErrorException('Failed to create post with files');
-    }
-  }
-
-  /**
-   * Create a comment on a post
-   */
-  async createComment(
-    userId: string,
-    postId: string,
-    createCommentDto: CreateCommentDto,
-  ): Promise<Comment> {
-    try {
-      const post = await this.postRepository.findOne({
-        where: { id: postId },
-        relations: ['user'],
-      });
-
-      if (!post) {
-        throw new NotFoundException('Post not found');
-      }
-
-      if (!post.allowComments) {
-        throw new ForbiddenException('Comments are disabled for this post');
-      }
-
-      const user = await this.cachingService.getOrSetUser(
-        'id',
-        userId,
-        async () => {
-          const userData = await this.userRepository.findOne({
-            where: { id: userId },
-          });
-          if (!userData) {
-            throw new NotFoundException('User not found');
-          }
-          return userData;
-        },
-      );
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      // Sanitize comment content
-      const sanitizedContent = sanitizeText(createCommentDto.content);
-
-      // Use transaction to ensure atomicity when updating parent comment and post counts
-      const savedComment = await this.dataSource.transaction(
-        async (transactionalEntityManager) => {
-          const comment = transactionalEntityManager.create(Comment, {
-            content: sanitizedContent,
-            postId,
-            userId,
-            post,
-            user,
-          });
-
-          // If parentCommentId is provided, verify it exists and belongs to the same post
-          if (createCommentDto.parentCommentId) {
-            const parentComment = await transactionalEntityManager.findOne(
-              Comment,
-              {
-                where: {
-                  id: createCommentDto.parentCommentId,
-                  postId,
-                },
-              },
-            );
-
-            if (!parentComment) {
-              throw new NotFoundException('Parent comment not found');
-            }
-
-            comment.parentComment = parentComment;
-            comment.parentCommentId = parentComment.id;
-
-            // Increment parent comment replies count atomically
-            await transactionalEntityManager.increment(
-              Comment,
-              { id: createCommentDto.parentCommentId },
-              'repliesCount',
-              1,
-            );
-          }
-
-          const savedComment = await transactionalEntityManager.save(
-            Comment,
-            comment,
-          );
-
-          // Increment post comments count atomically
-          await transactionalEntityManager.increment(
-            Post,
-            { id: postId },
-            'commentsCount',
-            1,
-          );
-
-          return savedComment;
-        },
-      );
-
-      // Invalidate post and comments cache
-      await this.cachingService.invalidateByTags(
-        'comment',
-        `comment:${savedComment.id}`,
-        `post:${postId}`,
-        `post:${postId}:comments`,
-      );
-
-      this.loggingService.log('Comment created', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: { commentId: savedComment.id, postId },
-      });
-
-      // Emit event for post comment (only if not self-comment)
-      if (post.userId !== userId) {
-        this.eventEmitter.emit('post.commented', {
-          commenterId: userId,
-          postId,
-          commentId: savedComment.id,
-          postOwnerId: post.userId,
-          parentCommentId: createCommentDto.parentCommentId || null,
-        });
-      }
-
-      return savedComment;
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error creating comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to create comment');
-    }
-  }
-
-  /**
-   * Like a post or comment
-   */
-  async likePostOrComment(
-    userId: string,
-    postId?: string,
-    commentId?: string,
-  ): Promise<Like> {
-    try {
-      if (!postId && !commentId) {
-        throw new BadRequestException(
-          'Either postId or commentId must be provided',
-        );
-      }
-
-      if (postId && commentId) {
-        throw new BadRequestException(
-          'Cannot like both post and comment simultaneously',
-        );
-      }
-
-      const user = await this.cachingService.getOrSetUser(
-        'id',
-        userId,
-        async () => {
-          const userData = await this.userRepository.findOne({
-            where: { id: userId },
-          });
-          if (!userData) {
-            throw new NotFoundException('User not found');
-          }
-          return userData;
-        },
-      );
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      // Check if like already exists
-      const existingLike = await this.likeRepository.findOne({
-        where: {
-          userId,
-          ...(postId ? { postId } : {}),
-          ...(commentId ? { commentId } : {}),
-        },
-      });
-
-      if (existingLike) {
-        // Already liked - return success instead of error to handle race conditions gracefully
-        return existingLike;
-      }
-
-      let post: Post | null = null;
-      let comment: Comment | null = null;
-
-      if (postId) {
-        post = await this.postRepository.findOne({
-          where: { id: postId },
-          relations: ['user'],
-        });
-
-        if (!post) {
-          throw new NotFoundException('Post not found');
-        }
-      }
-
-      if (commentId) {
-        comment = await this.commentRepository.findOne({
-          where: { id: commentId },
-          relations: ['user', 'post'],
-        });
-
-        if (!comment) {
-          throw new NotFoundException('Comment not found');
-        }
-      }
-
-      const like = this.likeRepository.create({
-        userId,
-        user,
-        likeType: postId ? 'post' : 'comment',
-        post: post || undefined,
-        postId: postId || undefined,
-        comment: comment || undefined,
-        commentId: commentId || undefined,
-      });
-
-      const savedLike = await this.likeRepository.save(like);
-
-      // Update counts atomically
-      if (postId && post) {
-        await this.postRepository.increment({ id: postId }, 'likesCount', 1);
-        // Invalidate post cache
-        await this.cachingService.invalidateByTags('post', `post:${postId}`);
-
-        // Emit event for post like (only if not self-like)
-        if (post.userId !== userId) {
-          this.eventEmitter.emit('post.liked', {
-            likerId: userId,
-            postId,
-            postOwnerId: post.userId,
-          });
-        }
-      }
-
-      if (commentId && comment) {
-        await this.commentRepository.increment({ id: commentId }, 'likesCount', 1);
-        // Invalidate comment cache
-        await this.cachingService.invalidateByTags(
-          'comment',
-          `comment:${commentId}`,
-        );
-
-        // Get post to get post owner ID for the notification URL
-        const postForComment = comment.post || await this.postRepository.findOne({
-          where: { id: comment.postId },
-          select: ['id', 'userId'],
-        });
-
-        // Emit event for comment like (only if not self-like)
-        if (comment.userId !== userId) {
-          this.eventEmitter.emit('comment.liked', {
-            likerId: userId,
-            commentId,
-            commentOwnerId: comment.userId,
-            postId: comment.postId,
-            postOwnerId: postForComment?.userId || null,
-          });
-        }
-      }
-
-      return savedLike;
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error liking post/comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to like post/comment');
-    }
-  }
-
-  /**
-   * Unlike a post or comment
-   */
-  async unlikePostOrComment(
-    userId: string,
-    postId?: string,
-    commentId?: string,
-  ): Promise<void> {
-    try {
-      if (!postId && !commentId) {
-        throw new BadRequestException(
-          'Either postId or commentId must be provided',
-        );
-      }
-
-      const like = await this.likeRepository.findOne({
-        where: {
-          userId,
-          ...(postId ? { postId } : {}),
-          ...(commentId ? { commentId } : {}),
-        },
-      });
-
-      if (!like) {
-        // Already unliked - return success instead of error to handle race conditions gracefully
-        return; // Already unliked, nothing to do
-      }
-
-      await this.likeRepository.remove(like);
-
-      // Update counts atomically
-      if (postId) {
-        await this.postRepository.decrement({ id: postId }, 'likesCount', 1);
-        // Invalidate post cache
-        await this.cachingService.invalidateByTags('post', `post:${postId}`);
-      }
-
-      if (commentId) {
-        await this.commentRepository.decrement({ id: commentId }, 'likesCount', 1);
-        // Invalidate comment cache
-        await this.cachingService.invalidateByTags(
-          'comment',
-          `comment:${commentId}`,
-        );
-      }
-
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error unliking post/comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to unlike post/comment');
-    }
-  }
-
-  /**
-   * Share a post
-   * Creates a new post in the user's feed that references the original post
-   */
-  async sharePost(
-    userId: string,
-    postId: string,
-    createShareDto: CreateShareDto,
-  ): Promise<Share> {
-    try {
-      const originalPost = await this.postRepository.findOne({
-        where: { id: postId },
-        relations: ['user'],
-      });
-
-      if (!originalPost) {
-        throw new NotFoundException('Post not found');
-      }
-
-      const user = await this.cachingService.getOrSetUser(
-        'id',
-        userId,
-        async () => {
-          const userData = await this.userRepository.findOne({
-            where: { id: userId },
-          });
-          if (!userData) {
-            throw new NotFoundException('User not found');
-          }
-          return userData;
-        },
-      );
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      // Sanitize share comment if provided
-      const sanitizedComment = createShareDto.comment
-        ? sanitizeText(createShareDto.comment)
-        : null;
-
-      // Use transaction to ensure atomicity
-      const result = await this.dataSource.transaction(async (transactionalEntityManager) => {
-        // Check if user has already shared this post
-        const existingShare = await transactionalEntityManager.findOne(Share, {
-          where: { userId, postId },
-        });
-
-        if (existingShare) {
-          throw new BadRequestException('Post already shared');
-        }
-
-        // Create Share entity
-        const share = transactionalEntityManager.create(Share, {
-          comment: sanitizedComment,
-          postId,
-          userId,
-        });
-
-        const savedShare = await transactionalEntityManager.save(Share, share);
-
-        // Increment original post shares count atomically
-        await transactionalEntityManager.increment(
-          Post,
-          { id: postId },
-          'sharesCount',
-          1,
-        );
-
-        return { share: savedShare };
-      });
-
-      // Invalidate post cache
-      await this.cachingService.invalidateByTags(
-        'post',
-        `post:${postId}`,
-        `user:${userId}:posts`,
-        'feed',
-      );
-
-      this.loggingService.log('Post shared', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: { shareId: result.share.id, postId },
-      });
-
-      // Emit event for post share (only if not self-share)
-      if (originalPost.userId !== userId) {
-        this.eventEmitter.emit('post.shared', {
-          sharerId: userId,
-          postId,
-          postOwnerId: originalPost.userId,
-          shareId: result.share.id,
-        });
-      }
-
-      return result.share;
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error sharing post',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to share post');
+      throw new InternalServerErrorException('Failed to upload post with files');
     }
   }
 
@@ -980,12 +699,8 @@ export class PostsService {
             throw new NotFoundException('Post not found');
           }
 
-          // Track view (async, don't wait)
-          if (postData.isPublic && !postData.isDraft) {
-            this.trackPostView(postId, userId).catch(() => {
-              // Silently fail view tracking
-            });
-          }
+          // Note: View tracking should be done via the dedicated endpoint
+          // POST /posts/:postId/view - not automatically on fetch
 
           return postData;
         },
@@ -1005,12 +720,12 @@ export class PostsService {
 
       if (userId) {
         const like = await this.likeRepository.findOne({
-          where: { userId, postId },
+          where: { userId, resourceType: 'post', resourceId: postId },
         });
         isLiked = !!like;
 
         const share = await this.shareRepository.findOne({
-          where: { userId, postId },
+          where: { userId, resourceType: 'post', resourceId: postId },
         });
         isShared = !!share;
       }
@@ -1092,12 +807,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -1212,12 +928,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId: currentUserId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -1298,23 +1015,30 @@ export class PostsService {
       });
 
       const followingUserIds = follows.map((f) => f.followingId);
-      
+
       // Include the current user's own posts in the feed
       const feedUserIds = [...followingUserIds, userId];
 
       // Get post IDs that the user has shared
       const sharedPosts = await this.shareRepository.find({
-        where: { userId },
-        select: ['postId'],
+        where: { userId, resourceType: 'post' },
+        select: ['resourceId'],
       });
-      const sharedPostIds = sharedPosts.map((s) => s.postId);
+      const sharedPostIds = sharedPosts.map((s) => s.resourceId).filter((id): id is string => id !== null);
 
       // Build query to get posts from followed users + posts the user has shared
+      // Show:
+      // - All public posts from followed users (including the user themselves)
+      // - Private posts from the user themselves (so they can see their own posts in their feed)
+      // - Private posts from friends (when friends functionality is added, will check friend relationship)
       const queryBuilder = this.postRepository
         .createQueryBuilder('post')
         .leftJoinAndSelect('post.user', 'user')
         .leftJoinAndSelect('user.profile', 'profile')
-        .where('post.isPublic = :isPublic', { isPublic: true })
+        .where(
+          '(post.isPublic = :isPublic OR (post.isPublic = :isPrivate AND post.userId = :currentUserId))',
+          { isPublic: true, isPrivate: false, currentUserId: userId },
+        )
         .andWhere('post.isDraft = :isDraft', { isDraft: false })
         .andWhere('post.isArchived = :isArchived', { isArchived: false })
         .andWhere(
@@ -1338,12 +1062,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -1383,387 +1108,6 @@ export class PostsService {
       );
 
       throw new InternalServerErrorException('Failed to get feed');
-    }
-  }
-
-  /**
-   * Get comments for a post
-   */
-  async findCommentsByPostId(
-    postId: string,
-    paginationDto: PaginationDto = {},
-    userId?: string,
-  ): Promise<
-    PaginationResponse<Comment & { isLiked: boolean } & Record<string, any>>
-  > {
-    try {
-      const post = await this.postRepository.findOne({
-        where: { id: postId },
-      });
-
-      if (!post) {
-        throw new NotFoundException('Post not found');
-      }
-
-      const page = paginationDto.page || 1;
-      const limit = paginationDto.limit || 10;
-      const sortBy = paginationDto.sortBy || 'dateCreated';
-      const sortOrder = paginationDto.sortOrder || 'DESC';
-      const skip = (page - 1) * limit;
-
-      const allowedSortFields = ['dateCreated', 'likesCount'];
-      const safeSortBy = allowedSortFields.includes(sortBy)
-        ? sortBy
-        : 'dateCreated';
-      const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
-
-      const queryBuilder = this.commentRepository
-        .createQueryBuilder('comment')
-        .leftJoinAndSelect('comment.user', 'user')
-        .leftJoinAndSelect('user.profile', 'profile')
-        .leftJoinAndSelect('comment.parentComment', 'parentComment')
-        .where('comment.postId = :postId', { postId })
-        .andWhere('comment.parentCommentId IS NULL') // Only top-level comments
-        .orderBy(`comment.${safeSortBy}`, safeSortOrder)
-        .skip(skip)
-        .take(limit);
-
-      const [comments, total] = await queryBuilder.getManyAndCount();
-
-      // Fetch replies for all top-level comments using query builder for proper serialization
-      const commentIds = comments.map((c) => c.id);
-      let replies: Comment[] = [];
-      if (commentIds.length > 0) {
-        const repliesQueryBuilder = this.commentRepository
-          .createQueryBuilder('reply')
-          .leftJoinAndSelect('reply.user', 'replyUser')
-          .leftJoinAndSelect('replyUser.profile', 'replyProfile')
-          .where('reply.postId = :postId', { postId })
-          .andWhere('reply.parentCommentId IS NOT NULL') // Only replies, not top-level comments
-          .andWhere('reply.parentCommentId IN (:...commentIds)', { commentIds })
-          .orderBy('reply.dateCreated', 'ASC');
-
-        replies = await repliesQueryBuilder.getMany();
-      }
-
-      // Group replies by parent comment
-      const repliesByParent = new Map<string, Comment[]>();
-      replies.forEach((reply) => {
-        if (reply.parentCommentId) {
-          const parentReplies = repliesByParent.get(reply.parentCommentId) || [];
-          parentReplies.push(reply);
-          repliesByParent.set(reply.parentCommentId, parentReplies);
-        }
-      });
-
-      // Get all comment IDs (including replies) for like checking
-      const allCommentIds = [...commentIds, ...replies.map((r) => r.id)];
-
-      // Batch fetch all likes for the user if authenticated
-      let userLikes: Set<string> = new Set();
-      if (userId && allCommentIds.length > 0) {
-        const likes = await this.likeRepository.find({
-          where: {
-            userId,
-            commentId: In(allCommentIds),
-          },
-          select: ['commentId'],
-        });
-        userLikes = new Set(
-          likes.map((like) => like.commentId).filter((id): id is string => id !== null),
-        );
-      }
-
-      // Attach replies and isLiked to each comment
-      // Properly serialize comments and replies with user data
-      const commentsWithLikes = comments.map((comment) => {
-        const commentReplies = repliesByParent.get(comment.id) || [];
-        return {
-          id: comment.id,
-          content: comment.content,
-          isEdited: comment.isEdited,
-          likesCount: comment.likesCount,
-          repliesCount: comment.repliesCount,
-          postId: comment.postId,
-          userId: comment.userId,
-          parentCommentId: comment.parentCommentId,
-          dateCreated: comment.dateCreated instanceof Date 
-            ? comment.dateCreated.toISOString() 
-            : comment.dateCreated,
-          dateUpdated: comment.dateUpdated instanceof Date 
-            ? comment.dateUpdated.toISOString() 
-            : comment.dateUpdated,
-          dateDeleted: comment.dateDeleted instanceof Date 
-            ? comment.dateDeleted.toISOString() 
-            : comment.dateDeleted || null,
-          user: comment.user
-            ? {
-                id: comment.user.id,
-                username: comment.user.username,
-                displayName: comment.user.displayName || comment.user.username,
-                profile: comment.user.profile
-                  ? {
-                      avatar: comment.user.profile.avatar,
-                    }
-                  : undefined,
-              }
-            : undefined,
-          isLiked: userId ? userLikes.has(comment.id) : false,
-          parentComment: null, // Explicitly set to null for top-level comments
-          replies: commentReplies.map((reply) => ({
-            id: reply.id,
-            content: reply.content,
-            isEdited: reply.isEdited,
-            likesCount: reply.likesCount,
-            repliesCount: reply.repliesCount,
-            postId: reply.postId,
-            userId: reply.userId,
-            parentCommentId: reply.parentCommentId,
-            dateCreated: reply.dateCreated instanceof Date 
-              ? reply.dateCreated.toISOString() 
-              : reply.dateCreated,
-            dateUpdated: reply.dateUpdated instanceof Date 
-              ? reply.dateUpdated.toISOString() 
-              : reply.dateUpdated,
-            dateDeleted: reply.dateDeleted instanceof Date 
-              ? reply.dateDeleted.toISOString() 
-              : reply.dateDeleted || null,
-            user: reply.user
-              ? {
-                  id: reply.user.id,
-                  username: reply.user.username,
-                  displayName: reply.user.displayName || reply.user.username,
-                  profile: reply.user.profile
-                    ? {
-                        avatar: reply.user.profile.avatar,
-                      }
-                    : undefined,
-                }
-              : undefined,
-            isLiked: userId ? userLikes.has(reply.id) : false,
-            replies: [], // Replies don't have nested replies
-          })),
-        };
-      });
-
-      const totalPages = Math.ceil(total / limit);
-      const meta: PaginationMeta = {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
-      };
-
-      return {
-        data: commentsWithLikes as any, // Custom serialized object with replies included
-        meta,
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error finding comments',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to find comments');
-    }
-  }
-
-  /**
-   * Get a single comment by ID
-   */
-  async findCommentById(
-    commentId: string,
-    userId?: string,
-  ): Promise<Record<string, any>> {
-    try {
-      const queryBuilder = this.commentRepository
-        .createQueryBuilder('comment')
-        .leftJoinAndSelect('comment.user', 'user')
-        .leftJoinAndSelect('user.profile', 'profile')
-        .leftJoinAndSelect('comment.parentComment', 'parentComment')
-        .where('comment.id = :commentId', { commentId })
-        .andWhere('comment.dateDeleted IS NULL');
-
-      const comment = await queryBuilder.getOne();
-
-      if (!comment) {
-        throw new NotFoundException('Comment not found');
-      }
-
-      // Check if user liked this comment
-      let isLiked = false;
-      if (userId) {
-        const like = await this.likeRepository.findOne({
-          where: {
-            userId,
-            commentId: comment.id,
-          },
-        });
-        isLiked = !!like;
-      }
-
-      // Serialize comment
-      return {
-        id: comment.id,
-        content: comment.content,
-        isEdited: comment.isEdited,
-        likesCount: comment.likesCount,
-        repliesCount: comment.repliesCount,
-        postId: comment.postId,
-        userId: comment.userId,
-        parentCommentId: comment.parentCommentId,
-        dateCreated: comment.dateCreated instanceof Date 
-          ? comment.dateCreated.toISOString() 
-          : comment.dateCreated,
-        dateUpdated: comment.dateUpdated instanceof Date 
-          ? comment.dateUpdated.toISOString() 
-          : comment.dateUpdated,
-        dateDeleted: comment.dateDeleted instanceof Date 
-          ? comment.dateDeleted.toISOString() 
-          : comment.dateDeleted || null,
-        user: comment.user
-          ? {
-              id: comment.user.id,
-              username: comment.user.username,
-              displayName: comment.user.displayName || comment.user.username,
-              profile: comment.user.profile
-                ? {
-                    avatar: comment.user.profile.avatar,
-                  }
-                : undefined,
-            }
-          : undefined,
-        isLiked,
-        parentComment: comment.parentComment || null,
-        replies: [],
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Failed to find comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to find comment');
-    }
-  }
-
-  /**
-   * Get replies to a comment
-   */
-  async findRepliesByCommentId(
-    commentId: string,
-    paginationDto: PaginationDto = {},
-    userId?: string,
-  ): Promise<
-    PaginationResponse<Comment & { isLiked: boolean } & Record<string, any>>
-  > {
-    try {
-      const parentComment = await this.commentRepository.findOne({
-        where: { id: commentId },
-      });
-
-      if (!parentComment) {
-        throw new NotFoundException('Comment not found');
-      }
-
-      const page = paginationDto.page || 1;
-      const limit = paginationDto.limit || 10;
-      const sortBy = paginationDto.sortBy || 'dateCreated';
-      const sortOrder = paginationDto.sortOrder || 'ASC';
-      const skip = (page - 1) * limit;
-
-      const allowedSortFields = ['dateCreated', 'likesCount'];
-      const safeSortBy = allowedSortFields.includes(sortBy)
-        ? sortBy
-        : 'dateCreated';
-      const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
-
-      const queryBuilder = this.commentRepository
-        .createQueryBuilder('comment')
-        .leftJoinAndSelect('comment.user', 'user')
-        .leftJoinAndSelect('user.profile', 'profile')
-        .where('comment.parentCommentId = :commentId', { commentId })
-        .orderBy(`comment.${safeSortBy}`, safeSortOrder)
-        .skip(skip)
-        .take(limit);
-
-      const [replies, total] = await queryBuilder.getManyAndCount();
-
-      // Batch fetch all likes for the user if authenticated
-      let userLikes: Set<string> = new Set();
-      if (userId && replies.length > 0) {
-        const replyIds = replies.map((r) => r.id);
-        const likes = await this.likeRepository.find({
-          where: {
-            userId,
-            commentId: In(replyIds),
-          },
-          select: ['commentId'],
-        });
-        userLikes = new Set(
-          likes.map((like) => like.commentId).filter((id): id is string => id !== null),
-        );
-      }
-
-      // Check which replies are liked by the user
-      const repliesWithLikes = replies.map((reply) => ({
-        ...reply,
-        isLiked: userId ? userLikes.has(reply.id) : false,
-      }));
-
-      const totalPages = Math.ceil(total / limit);
-      const meta: PaginationMeta = {
-        page,
-        limit,
-        total,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
-      };
-
-      return {
-        data: repliesWithLikes as (Comment & { isLiked: boolean } & Record<
-            string,
-            any
-          >)[],
-        meta,
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error finding comment replies',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to find comment replies');
     }
   }
 
@@ -1875,77 +1219,18 @@ export class PostsService {
     }
   }
 
-  /**
-   * Update a comment
-   */
-  async updateComment(
-    userId: string,
-    commentId: string,
-    updateCommentDto: UpdateCommentDto,
-  ): Promise<Comment> {
-    try {
-      const comment = await this.commentRepository.findOne({
-        where: { id: commentId },
-        relations: ['user'],
-      });
-
-      if (!comment) {
-        throw new NotFoundException('Comment not found');
-      }
-
-      if (comment.userId !== userId) {
-        throw new ForbiddenException('You can only update your own comments');
-      }
-
-      // Sanitize updated content
-      if (updateCommentDto.content !== undefined) {
-        comment.content = sanitizeText(updateCommentDto.content);
-      }
-      comment.isEdited = true;
-
-      const updatedComment = await this.commentRepository.save(comment);
-
-      // Invalidate comment and post cache
-      await this.cachingService.invalidateByTags(
-        'comment',
-        `comment:${commentId}`,
-        `post:${comment.postId}`,
-        `post:${comment.postId}:comments`,
-      );
-
-      this.loggingService.log('Comment updated', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: { commentId },
-      });
-
-      return updatedComment;
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error updating comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to update comment');
-    }
-  }
-
   // #########################################################
   // DELETE OPTIONS
   // #########################################################
+
+  /**
+   * Helper method to check if a URL is a video URL
+   */
+  private isVideoUrl(url: string): boolean {
+    const videoExtensions = ['.mp4', '.webm', '.mov', '.quicktime'];
+    const lowerUrl = url.toLowerCase();
+    return videoExtensions.some((ext) => lowerUrl.includes(ext));
+  }
 
   /**
    * Delete a post
@@ -1964,6 +1249,77 @@ export class PostsService {
         throw new ForbiddenException('You can only delete your own posts');
       }
 
+      // Check if post has videos and delete them
+      const videoUrls: string[] = [];
+      if (post.mediaUrl && this.isVideoUrl(post.mediaUrl)) {
+        videoUrls.push(post.mediaUrl);
+      }
+      if (post.mediaUrls && post.mediaUrls.length > 0) {
+        post.mediaUrls.forEach((url) => {
+          if (this.isVideoUrl(url) && !videoUrls.includes(url)) {
+            videoUrls.push(url);
+          }
+        });
+      }
+
+      // Delete videos that were created from this post
+      if (videoUrls.length > 0) {
+        try {
+          // Access the video repository through the data source
+          const videoRepository = this.dataSource.getRepository(Video);
+
+          // Batch fetch all videos by URLs to avoid N+1
+          if (videoUrls.length > 0) {
+            const videos = await videoRepository.find({
+              where: {
+                userId,
+                videoUrl: In(videoUrls),
+                dateDeleted: IsNull(),
+              },
+            });
+
+            // Delete each matching video
+            for (const video of videos) {
+              try {
+                await this.videosService.deleteVideo(userId, video.id);
+              } catch (videoError) {
+                // Log but don't fail post deletion if video deletion fails
+                this.loggingService.error(
+                  `Failed to delete video ${video.id} when deleting post ${postId}`,
+                  videoError instanceof Error ? videoError.stack : undefined,
+                  'PostsService',
+                  {
+                    category: LogCategory.DATABASE,
+                    userId,
+                    error:
+                      videoError instanceof Error
+                        ? videoError
+                        : new Error(String(videoError)),
+                    metadata: { postId, videoId: video.id, videoUrl: video.videoUrl },
+                  },
+                );
+              }
+            }
+          }
+        } catch (videoDeletionError) {
+          // Log but don't fail post deletion if video deletion fails
+          this.loggingService.error(
+            'Error deleting videos associated with post',
+            videoDeletionError instanceof Error ? videoDeletionError.stack : undefined,
+            'PostsService',
+            {
+              category: LogCategory.DATABASE,
+              userId,
+              error:
+                videoDeletionError instanceof Error
+                  ? videoDeletionError
+                  : new Error(String(videoDeletionError)),
+              metadata: { postId, videoUrls },
+            },
+          );
+        }
+      }
+
       // Delete the post
       // TypeORM will automatically handle the ManyToMany join table cleanup
       // CASCADE will handle related entities (comments, likes, shares, bookmarks, etc.)
@@ -1975,6 +1331,18 @@ export class PostsService {
         `post:${postId}`,
         `user:${userId}:posts`,
       );
+
+      // Recalculate user analytics immediately (await to ensure it completes)
+      try {
+        await this.analyticsService.calculateUserAnalytics(userId);
+      } catch (error: unknown) {
+        this.loggingService.error(
+          'Error recalculating user analytics after post deletion',
+          error instanceof Error ? error.stack : undefined,
+          'PostsService',
+        );
+        // Don't fail deletion if analytics recalculation fails
+      }
 
       this.loggingService.log('Post deleted', 'PostsService', {
         category: LogCategory.USER_MANAGEMENT,
@@ -2058,110 +1426,6 @@ export class PostsService {
     }
   }
 
-  /**
-   * Delete a comment
-   * If it's a parent comment, also deletes all its replies (cascade delete)
-   */
-  async deleteComment(userId: string, commentId: string): Promise<void> {
-    try {
-      const comment = await this.commentRepository.findOne({
-        where: { id: commentId },
-        relations: ['user', 'post'],
-      });
-
-      if (!comment) {
-        throw new NotFoundException('Comment not found');
-      }
-
-      if (comment.userId !== userId) {
-        throw new ForbiddenException('You can only delete your own comments');
-      }
-
-      const postId = comment.postId;
-      const parentCommentId = comment.parentCommentId;
-      const repliesCount = comment.repliesCount || 0;
-
-      // Use transaction to ensure atomicity
-      await this.dataSource.transaction(async (transactionalEntityManager) => {
-        // If this is a parent comment with replies, delete all replies first
-        if (repliesCount > 0) {
-          const replies = await transactionalEntityManager.find(Comment, {
-            where: { parentCommentId: commentId },
-          });
-
-          if (replies.length > 0) {
-            // Delete all replies
-            await transactionalEntityManager.remove(Comment, replies);
-
-            // Decrement post comments count by number of replies deleted
-            await transactionalEntityManager.decrement(
-              Post,
-              { id: postId },
-              'commentsCount',
-              replies.length,
-            );
-          }
-        }
-
-        // Delete the comment itself
-        await transactionalEntityManager.remove(Comment, comment);
-
-        // Decrement counts atomically
-        if (parentCommentId) {
-          // This is a reply, decrement parent's repliesCount
-          await transactionalEntityManager.decrement(
-            Comment,
-            { id: parentCommentId },
-            'repliesCount',
-            1,
-          );
-        }
-
-        // Decrement post comments count (1 for the comment itself, replies already handled above)
-        await transactionalEntityManager.decrement(
-          Post,
-          { id: postId },
-          'commentsCount',
-          1,
-        );
-      });
-
-      // Invalidate comment and post cache
-      await this.cachingService.invalidateByTags(
-        'comment',
-        `comment:${commentId}`,
-        `post:${postId}`,
-        `post:${postId}:comments`,
-      );
-
-      this.loggingService.log('Comment deleted', 'PostsService', {
-        category: LogCategory.USER_MANAGEMENT,
-        userId,
-        metadata: { commentId, repliesDeleted: repliesCount },
-      });
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-
-      this.loggingService.error(
-        'Error deleting comment',
-        error instanceof Error ? error.stack : undefined,
-        'PostsService',
-        {
-          category: LogCategory.DATABASE,
-          userId,
-          error: error instanceof Error ? error : new Error(String(error)),
-        },
-      );
-
-      throw new InternalServerErrorException('Failed to delete comment');
-    }
-  }
-
   // #########################################################
   // BOOKMARK OPTIONS
   // #########################################################
@@ -2200,8 +1464,14 @@ export class PostsService {
 
       const savedBookmark = await this.bookmarkRepository.save(bookmark);
 
-      // Increment bookmarks count atomically
-      await this.postRepository.increment({ id: postId }, 'bookmarksCount', 1);
+      // Recalculate analytics (in background)
+      this.analyticsService.calculatePostAnalytics(postId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating post analytics after bookmark',
+          error instanceof Error ? error.stack : undefined,
+          'PostsService',
+        );
+      });
 
       // Invalidate cache
       await this.cachingService.invalidateByTags('post', `post:${postId}`, `user:${userId}:bookmarks`);
@@ -2251,8 +1521,14 @@ export class PostsService {
 
       await this.bookmarkRepository.remove(bookmark);
 
-      // Decrement bookmarks count atomically
-      await this.postRepository.decrement({ id: postId }, 'bookmarksCount', 1);
+      // Recalculate analytics (in background)
+      this.analyticsService.calculatePostAnalytics(postId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating post analytics after unbookmark',
+          error instanceof Error ? error.stack : undefined,
+          'PostsService',
+        );
+      });
 
       // Invalidate cache
       await this.cachingService.invalidateByTags('post', `post:${postId}`, `user:${userId}:bookmarks`);
@@ -2314,12 +1590,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -2370,19 +1647,27 @@ export class PostsService {
       const limit = paginationDto.limit || 10;
       const skip = (page - 1) * limit;
 
+      // Get likes for posts (not comments)
       const queryBuilder = this.likeRepository
         .createQueryBuilder('like')
-        .leftJoinAndSelect('like.post', 'post')
-        .leftJoinAndSelect('post.user', 'user')
-        .leftJoinAndSelect('user.profile', 'profile')
         .where('like.userId = :userId', { userId })
-        .andWhere('like.postId IS NOT NULL') // Only get post likes, not comment likes
+        .andWhere('like.resourceType = :resourceType', { resourceType: 'post' })
         .orderBy('like.dateCreated', 'DESC')
         .skip(skip)
         .take(limit);
 
       const [likes, total] = await queryBuilder.getManyAndCount();
-      const posts = likes.map((l) => l.post).filter((p): p is Post => p !== null);
+
+      // Extract post IDs from likes
+      const postIds = likes.map((l) => l.resourceId).filter((id): id is string => id !== null);
+
+      // Fetch posts separately
+      const posts = postIds.length > 0
+        ? await this.postRepository.find({
+            where: { id: In(postIds) },
+            relations: ['user', 'user.profile'],
+          })
+        : [];
 
       // All posts in this list are liked by the user
       const postsWithLikes = posts.map((post) => ({
@@ -2432,18 +1717,27 @@ export class PostsService {
       const limit = paginationDto.limit || 10;
       const skip = (page - 1) * limit;
 
+      // Get shares for posts
       const queryBuilder = this.shareRepository
         .createQueryBuilder('share')
-        .leftJoinAndSelect('share.post', 'post')
-        .leftJoinAndSelect('post.user', 'user')
-        .leftJoinAndSelect('user.profile', 'profile')
         .where('share.userId = :userId', { userId })
+        .andWhere('share.resourceType = :resourceType', { resourceType: 'post' })
         .orderBy('share.dateCreated', 'DESC')
         .skip(skip)
         .take(limit);
 
       const [shares, total] = await queryBuilder.getManyAndCount();
-      const posts = shares.map((s) => s.post).filter((p): p is Post => p !== null);
+
+      // Extract post IDs from shares
+      const postIds = shares.map((s) => s.resourceId).filter((id): id is string => id !== null);
+
+      // Fetch posts separately
+      const posts = postIds.length > 0
+        ? await this.postRepository.find({
+            where: { id: In(postIds) },
+            relations: ['user', 'user.profile'],
+          })
+        : [];
 
       // Batch fetch likes
       let userLikes: Set<string> = new Set();
@@ -2452,12 +1746,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -2501,9 +1796,9 @@ export class PostsService {
   // #########################################################
 
   /**
-   * Track post view (increment viewsCount)
+   * Track post view (increment viewsCount and track geographic data)
    */
-  async trackPostView(postId: string, _userId?: string): Promise<void> {
+  async trackPostView(postId: string, req: any, userId?: string): Promise<void> {
     try {
       const post = await this.postRepository.findOne({
         where: { id: postId },
@@ -2513,13 +1808,24 @@ export class PostsService {
         throw new NotFoundException('Post not found');
       }
 
-      // Only increment if post is public and not a draft
+      // Only track if post is public and not a draft
       if (!post.isPublic || post.isDraft) {
         return;
       }
 
-      // Use atomic increment to prevent race conditions
-      await this.postRepository.increment({ id: postId }, 'viewsCount', 1);
+      // Track view using centralized tracking service
+      const trackingResult = await this.trackingService.trackPostView(postId, post.userId, req, userId);
+
+      // Only recalculate analytics if view was actually tracked (not a duplicate)
+      if (trackingResult.tracked) {
+        this.analyticsService.calculatePostAnalytics(postId).catch((error: unknown) => {
+          this.loggingService.error(
+            'Error recalculating post analytics after view',
+            error instanceof Error ? error.stack : undefined,
+            'PostsService',
+          );
+        });
+      }
 
       // Invalidate cache
       await this.cachingService.invalidateByTags('post', `post:${postId}`);
@@ -2584,12 +1890,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -2677,12 +1984,13 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds),
+            resourceType: 'post',
+            resourceId: In(postIds),
           },
-          select: ['postId'],
+          select: ['resourceId'],
         });
         userLikes = new Set(
-          likes.map((like) => like.postId).filter((id): id is string => id !== null),
+          likes.map((like) => like.resourceId).filter((id): id is string => id !== null),
         );
       }
 
@@ -2766,8 +2074,14 @@ export class PostsService {
 
       const savedReport = await this.reportRepository.save(report);
 
-      // Increment reports count atomically
-      await this.postRepository.increment({ id: postId }, 'reportsCount', 1);
+      // Recalculate analytics (in background)
+      this.analyticsService.calculatePostAnalytics(postId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating post analytics after report',
+          error instanceof Error ? error.stack : undefined,
+          'PostsService',
+        );
+      });
 
       // Invalidate cache
       await this.cachingService.invalidateByTags('post', `post:${postId}`);
@@ -3017,7 +2331,7 @@ export class PostsService {
         },
       );
 
-      throw new InternalServerErrorException('Failed to create collection');
+      throw new InternalServerErrorException('Failed to upload collection');
     }
   }
 
@@ -3088,8 +2402,8 @@ export class PostsService {
       collection.posts.push(post);
       const savedCollection = await this.collectionRepository.save(collection);
 
-      // Increment collection posts count atomically
-      await this.collectionRepository.increment({ id: collectionId }, 'postsCount', 1);
+      // Note: Collection postsCount is maintained by the collection entity itself
+      // Analytics recalculation for collections can be added if needed
 
       this.loggingService.log('Post added to collection', 'PostsService', {
         category: LogCategory.USER_MANAGEMENT,
@@ -3169,13 +2483,8 @@ export class PostsService {
       collection.posts = collection.posts.filter((p) => p.id !== postId);
       await this.collectionRepository.save(collection);
 
-      // Decrement collection posts count atomically (ensure it doesn't go below 0)
-      if (collection.postsCount > 0) {
-        await this.collectionRepository.decrement({ id: collectionId }, 'postsCount', 1);
-      } else {
-        // Reset to 0 if somehow negative
-        await this.collectionRepository.update({ id: collectionId }, { postsCount: 0 });
-      }
+      // Note: Collection postsCount is maintained by the collection entity itself
+      // Analytics recalculation for collections can be added if needed
 
       this.loggingService.log('Post removed from collection', 'PostsService', {
         category: LogCategory.USER_MANAGEMENT,
@@ -3281,10 +2590,11 @@ export class PostsService {
         const likes = await this.likeRepository.find({
           where: {
             userId,
-            postId: In(postIds.filter((id): id is string => id !== null)),
+            resourceType: 'post',
+            resourceId: In(postIds.filter((id): id is string => id !== null)),
           },
         });
-        userLikes = new Set(likes.map((like) => like.postId).filter((id): id is string => id !== null));
+        userLikes = new Set(likes.map((like) => like.resourceId).filter((id): id is string => id !== null));
       }
 
       // Add isLiked flag to each post

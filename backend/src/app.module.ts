@@ -20,11 +20,27 @@ import { DeveloperModule } from './security/developer/developer.module';
 import * as Joi from 'joi';
 // Guards
 import { AuthGuard } from './security/auth/guards/auth.guard';
+import { CsrfGuard } from './security/auth/guards/csrf.guard';
 import { ThrottleGuard } from '@throttle/throttle';
 import { OAuthRateLimitGuard } from './security/developer/services/rate-limit';
 import { OAuthGuard } from './security/developer/services/oauth';
 import { ScopeGuard } from './security/developer/services/scopes';
-import { NotificationsModule } from './rest/api/notificaitons/notificaitons.module';
+import { NotificationsModule } from './rest/api/users/services/notifications/notifications.module';
+import { TrackingModule } from './services/tracking/tracking.module';
+import { AnalyticsModule } from './services/analytics/analytics.module';
+import { CommentsModule } from './services/comments/comments.module';
+import { LikesModule } from './services/likes/likes.module';
+import { SharesModule } from './services/shares/shares.module';
+import { LoggingModule } from '@logging/logging';
+import { MonitoringModule } from './common/monitoring/monitoring.module';
+
+// Filters
+import { HttpExceptionFilter } from './filters/http-exception.filter';
+import { AllExceptionsFilter } from './filters/all-exceptions.filter';
+
+// Interceptors
+import { LoggingInterceptor } from './common/monitoring/interceptors/logging.interceptor';
+import { PerformanceInterceptor } from './common/monitoring/interceptors/performance.interceptor';
 
 // Configuration Variables
 
@@ -106,6 +122,11 @@ import { NotificationsModule } from './rest/api/notificaitons/notificaitons.modu
         REDIS_SESSION_PREFIX: Joi.string().required().min(1),
         SESSION_TTL: Joi.number().required().min(60).max(31536000), // 1 minute to 1 year
         // ============================================
+        // CSRF VALIDATION
+        // ============================================
+        CSRF_ENABLED: Joi.string().valid('true', 'false').default('true'),
+        CSRF_SECRET: Joi.string().allow('').default(''), // Optional, falls back to SESSION_SECRET
+        // ============================================
         // THROTTLE VALIDATION
         // ============================================
         THROTTLE_DEFAULT_LIMIT: Joi.number().required().min(1).max(10000),
@@ -172,14 +193,26 @@ import { NotificationsModule } from './rest/api/notificaitons/notificaitons.modu
     StorageModule,
     DeveloperModule,
     NotificationsModule,
+    TrackingModule,
+    AnalyticsModule,
+    CommentsModule,
+    LikesModule,
+    SharesModule,
+    LoggingModule,
+    MonitoringModule,
   ],
   controllers: [],
   providers: [
     { provide: 'APP_GUARD', useClass: AuthGuard },
+    { provide: 'APP_GUARD', useClass: CsrfGuard },
     { provide: 'APP_GUARD', useClass: OAuthGuard },
     { provide: 'APP_GUARD', useClass: ThrottleGuard },
     { provide: 'APP_GUARD', useClass: OAuthRateLimitGuard },
     { provide: 'APP_GUARD', useClass: ScopeGuard },
+    { provide: 'APP_FILTER', useClass: AllExceptionsFilter },
+    { provide: 'APP_FILTER', useClass: HttpExceptionFilter },
+    { provide: 'APP_INTERCEPTOR', useClass: LoggingInterceptor },
+    { provide: 'APP_INTERCEPTOR', useClass: PerformanceInterceptor },
   ],
 })
 export class AppModule {}

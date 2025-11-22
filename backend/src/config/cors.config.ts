@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 // Default localhost origins for development
 const defaultLocalOrigins = [
   'http://localhost:3000',
@@ -19,6 +21,9 @@ const defaultProductionOrigins = [
   'https://x.com',
 ];
 
+// Logger instance for CORS error logging
+const corsLogger = new Logger('CORS');
+
 /**
  * Get CORS origins from environment variable or use defaults
  * CORS_ORIGINS should be a comma-separated list of URLs
@@ -35,9 +40,24 @@ const getOriginsFromEnv = (env: string): string[] => {
   return env === 'production' ? defaultProductionOrigins : defaultLocalOrigins;
 };
 
-// Function to check if an origin is allowed (handles wildcard subdomains)
-const isAllowedOrigin = (origin: string | undefined, env: string): boolean => {
-  if (!origin) return false;
+/**
+ * Function to check if an origin is allowed (handles wildcard subdomains)
+ * @param origin - The origin to check
+ * @param env - The environment (development/production)
+ * @param logRejection - Whether to log rejected origins (default: true)
+ * @returns true if origin is allowed, false otherwise
+ */
+const isAllowedOrigin = (
+  origin: string | undefined,
+  env: string,
+  logRejection: boolean = true,
+): boolean => {
+  if (!origin) {
+    if (logRejection) {
+      corsLogger.warn('CORS: Request with no origin header');
+    }
+    return false;
+  }
 
   const allowedOrigins = getOriginsFromEnv(env);
 
@@ -55,6 +75,14 @@ const isAllowedOrigin = (origin: string | undefined, env: string): boolean => {
     return true;
   }
 
+  // Log rejected origin for debugging and security monitoring
+  if (logRejection) {
+    corsLogger.warn(
+      `CORS: Origin rejected - ${origin}`,
+      `Allowed origins: ${allowedOrigins.length} configured (${env === 'production' ? 'production' : 'development'} mode)`,
+    );
+  }
+
   return false;
 };
 
@@ -62,6 +90,11 @@ export const getCorsOrigins = (env: string): string[] => {
   return getOriginsFromEnv(env);
 };
 
+/**
+ * Get CORS origin validation function with error handling and logging
+ * @param env - The environment (development/production)
+ * @returns CORS origin validation function
+ */
 export const getCorsOriginFunction = (
   env: string,
 ): ((
@@ -72,6 +105,15 @@ export const getCorsOriginFunction = (
     origin: string | undefined,
     callback: (err: Error | null, allow?: boolean) => void,
   ) => {
-    callback(null, isAllowedOrigin(origin, env));
+    try {
+      const isAllowed = isAllowedOrigin(origin, env, true);
+      callback(null, isAllowed);
+    } catch (error) {
+      // Log CORS configuration errors
+      const errorMessage = error instanceof Error ? error.message : 'Unknown CORS error';
+      corsLogger.error(`CORS configuration error: ${errorMessage}`, error instanceof Error ? error.stack : undefined);
+      // Reject on error to be safe
+      callback(error instanceof Error ? error : new Error(errorMessage), false);
+    }
   };
 };

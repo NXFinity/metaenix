@@ -14,6 +14,8 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageType, STORAGE_TYPE_METADATA } from './assets/enum/storage-type.enum';
 import { LoggingService, LogCategory } from '@logging/logging';
+import { FileValidationService } from './services/file-validation.service';
+import { ClamAVScannerService } from './services/clamav-scanner.service';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
@@ -26,6 +28,8 @@ export class StorageService {
   constructor(
     private readonly configService: ConfigService,
     private readonly loggingService: LoggingService,
+    private readonly fileValidationService: FileValidationService,
+    private readonly clamAVScannerService: ClamAVScannerService,
   ) {
     // Initialize S3 client for Digital Ocean Spaces
     const spacesKey = this.configService.get<string>('DO_SPACES_KEY');
@@ -102,6 +106,90 @@ export class StorageService {
         throw new BadRequestException(
           `File type ${file.mimetype} is not allowed for storage type ${storageType}`,
         );
+      }
+
+      // Validate file content matches declared MIME type (magic byte verification)
+      // Skip validation for TEMP storage type (allows all types)
+      if (metadata.allowedMimeTypes[0] !== '*') {
+        try {
+          this.fileValidationService.validateFileContent(
+            file.buffer,
+            file.mimetype,
+          );
+        } catch (validationError) {
+          this.loggingService.error(
+            'File content validation failed',
+            validationError instanceof Error ? validationError.stack : undefined,
+            'StorageService',
+            {
+              category: LogCategory.STORAGE,
+              userId,
+              metadata: {
+                storageType,
+                declaredMimeType: file.mimetype,
+                fileName: file.originalname,
+              },
+              error:
+                validationError instanceof Error
+                  ? validationError
+                  : new Error(String(validationError)),
+            },
+          );
+          throw validationError;
+        }
+      }
+
+      // Scan file for viruses/malware using ClamAV (if enabled)
+      if (this.clamAVScannerService.isEnabled()) {
+        try {
+          const scanResult = await this.clamAVScannerService.scanBuffer(
+            file.buffer,
+            file.originalname,
+          );
+
+          if (scanResult.isInfected) {
+            this.loggingService.error(
+              'Virus detected in uploaded file',
+              undefined,
+              'StorageService',
+              {
+                category: LogCategory.STORAGE,
+                userId,
+                metadata: {
+                  storageType,
+                  fileName: file.originalname,
+                  threats: scanResult.threats,
+                },
+              },
+            );
+
+            throw new BadRequestException(
+              `File contains malware: ${scanResult.threats.join(', ')}. Upload rejected for security reasons.`,
+            );
+          }
+        } catch (scanError) {
+          // If it's a BadRequestException (malware detected), re-throw it
+          if (scanError instanceof BadRequestException) {
+            throw scanError;
+          }
+
+          // For other errors (ClamAV unavailable, etc.), log but don't block upload
+          // This is fail-safe behavior - if ClamAV is down, we still allow uploads
+          this.loggingService.warn(
+            'Virus scan failed, allowing upload (fail-safe)',
+            'StorageService',
+            {
+              category: LogCategory.STORAGE,
+              userId,
+              metadata: {
+                storageType,
+                fileName: file.originalname,
+                error: scanError instanceof Error ? scanError.message : String(scanError),
+                stack: scanError instanceof Error ? scanError.stack : undefined,
+              },
+            },
+          );
+        }
       }
 
       // Validate sub-type for profile storage

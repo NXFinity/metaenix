@@ -8,12 +8,14 @@ import { Privacy } from '../../assets/entities/security/privacy.entity';
 import { RedisModule } from '@redis/redis';
 import { FollowsGateway } from './follows.gateway';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { AnalyticsModule } from 'src/services/analytics/analytics.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Follow, User, Privacy]),
     RedisModule,
     EventEmitterModule,
+    AnalyticsModule,
   ],
   controllers: [FollowsController],
   providers: [FollowsService, FollowsGateway],

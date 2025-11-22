@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "",
   "author": "",
   "private": true,
@@ -17,6 +17,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:integration": "jest --config ./test/jest-integration.json",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "--- | [ DOCKER BUILD & DEPLOY ] ---": "",
     "docker:build": "docker build -t balpha . --no-cache",
@@ -48,6 +49,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.1.6",
+    "@types/geoip-lite": "^1.4.4",
     "@types/puppeteer": "^5.4.7",
     "@types/qrcode": "^1.5.6",
     "amqp-connection-manager": "^4.1.14",
@@ -67,6 +69,7 @@
     "csrf-csrf": "^4.0.3",
     "discord.js": "^14.22.1",
     "express-session": "^1.18.2",
+    "geoip-lite": "^1.4.10",
     "hads": "^3.0.3",
     "helmet": "^8.1.0",
     "ioredis": "^5.7.0",
@@ -152,9 +155,27 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/*.e2e-spec.ts",
+      "!**/node_modules/**",
+      "!**/dist/**",
+      "!**/test/**"
     ],
     "coverageDirectory": "./coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    },
     "testEnvironment": "node",
     "roots": [
       "<rootDir>/src/",
@@ -167,7 +188,8 @@
       "^@kafka/kafka(|/.*)$": "<rootDir>/libs/kafka/src/$1",
       "^@logging/logging(|/.*)$": "<rootDir>/libs/logging/src/$1",
       "^@redis/redis(|/.*)$": "<rootDir>/libs/redis/src/$1",
-      "^@throttle/throttle(|/.*)$": "<rootDir>/libs/throttle/src/$1"
+      "^@throttle/throttle(|/.*)$": "<rootDir>/libs/throttle/src/$1",
+      "^src/(.*)$": "<rootDir>/src/$1"
     }
   }
 }
