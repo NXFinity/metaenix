@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsOptional, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateShareDto {
   @ApiProperty({
@@ -9,6 +9,7 @@ export class CreateShareDto {
     required: false,
   })
   @IsOptional()
+  @ValidateIf((o) => o.comment !== undefined && o.comment !== null && o.comment !== '')
   @IsString()
   @MaxLength(1000, { message: 'Share comment cannot exceed 1000 characters' })
   comment?: string;

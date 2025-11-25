@@ -5,5 +5,6 @@ export enum NotificationType {
   COMMENT_REPLY = 'comment_reply',
   COMMENT_LIKE = 'comment_like',
   POST_SHARE = 'post_share',
+  CONTENT_REPORT = 'content_report',
 }
 

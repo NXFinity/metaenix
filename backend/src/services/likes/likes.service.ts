@@ -14,6 +14,7 @@ import { CachingService } from '@caching/caching';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Post } from '../../rest/api/users/services/posts/assets/entities/post.entity';
 import { Video } from '../../rest/api/users/services/videos/assets/entities/video.entity';
+import { Photo } from '../../rest/api/users/services/photos/assets/entities/photo.entity';
 import { Comment } from '../../services/comments/assets/entities/comment.entity';
 import { User } from '../../rest/api/users/assets/entities/user.entity';
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -29,6 +30,8 @@ export class LikesService {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
+    @InjectRepository(Photo)
+    private readonly photoRepository: Repository<Photo>,
     @InjectRepository(Comment)
     private readonly commentRepository: Repository<Comment>,
     private readonly loggingService: LoggingService,
@@ -69,6 +72,19 @@ export class LikesService {
         return {
           exists: true,
           ownerId: video.userId,
+        };
+
+      case LikeResourceType.PHOTO:
+        const photo = await this.photoRepository.findOne({
+          where: { id: resourceId, dateDeleted: IsNull() },
+          select: ['id', 'userId'],
+        });
+        if (!photo) {
+          return { exists: false };
+        }
+        return {
+          exists: true,
+          ownerId: photo.userId,
         };
 
       case LikeResourceType.COMMENT:
@@ -148,6 +164,13 @@ export class LikesService {
       });
 
       const savedLike = await this.likeRepository.save(like);
+
+      // Update Post/Video counts directly
+      if (resourceType === LikeResourceType.POST) {
+        await this.postRepository.increment({ id: resourceId }, 'likesCount', 1);
+      } else if (resourceType === LikeResourceType.VIDEO) {
+        await this.videoRepository.increment({ id: resourceId }, 'likesCount', 1);
+      }
 
       // Invalidate cache
       await this.cachingService.invalidateByTags(
@@ -264,6 +287,13 @@ export class LikesService {
       const resource = await this.validateResource(resourceType, resourceId);
 
       await this.likeRepository.remove(like);
+
+      // Update Post/Video counts directly
+      if (resourceType === LikeResourceType.POST) {
+        await this.postRepository.decrement({ id: resourceId }, 'likesCount', 1);
+      } else if (resourceType === LikeResourceType.VIDEO) {
+        await this.videoRepository.decrement({ id: resourceId }, 'likesCount', 1);
+      }
 
       // Invalidate cache
       await this.cachingService.invalidateByTags(

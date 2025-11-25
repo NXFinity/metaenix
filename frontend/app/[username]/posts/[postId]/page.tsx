@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { postsService } from '@/core/api/posts';
+import { postsService } from '@/core/api/users/posts';
 import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 import { Card, CardContent } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
@@ -81,8 +81,8 @@ function PostDetailPageContent() {
       </Button>
 
       {/* Post Card - prevent navigation on click since we're on detail page */}
-      <PostCard 
-        post={post} 
+      <PostCard
+        post={post}
         showFullContent={true}
         onPostClick={() => {}} // No-op since we're already on the detail page
       />

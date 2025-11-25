@@ -9,7 +9,6 @@ import {
   Query,
   Req,
   UnauthorizedException,
-  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './assets/dto/createUser.dto';
@@ -22,10 +21,10 @@ import {
   // ApiQuery, // Reserved for future use
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { AdminGuard } from '../../../security/auth/guards/admin.guard';
+// AdminGuard import removed - admin endpoints moved to /v1/admin/*
 import { PaginationDto } from '../../../common/dto/pagination.dto';
 import { Public } from '../../../security/auth/decorators/public.decorator';
-import { RequireScope } from '../../../security/developer/services/scopes/decorators/require-scope.decorator';
+import { RequireScope } from '../../../security/developer/services/scopes';
 
 @ApiTags('Account Management | Users')
 @Controller('users')
@@ -47,10 +46,11 @@ export class UsersController {
 
   @Get()
   @Public()
+  @RequireScope('read:profile') // Required for OAuth tokens accessing private profiles
   @ApiOperation({
-    summary: 'Get all users with pagination',
+    summary: 'Get all users with pagination (public browse)',
     description:
-      'Returns paginated list of users. Supports pagination with page, limit, sortBy, and sortOrder query parameters.',
+      'Returns paginated list of public users. Supports pagination with page, limit, sortBy, and sortOrder query parameters. Only returns public profiles, follower-only profiles, and subscriber-only profiles.',
   })
   @ApiResponse({
     status: 200,
@@ -75,10 +75,6 @@ export class UsersController {
         },
       },
     },
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - Administrator privileges required',
   })
   findAll(@Query() paginationDto: PaginationDto) {
     return this.usersService.findAll(paginationDto);
@@ -388,86 +384,8 @@ export class UsersController {
     return this.usersService.updateUser(userId, updateUserDto);
   }
 
-  @Patch(':id')
-  @UseGuards(AdminGuard)
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Update user by ID (admin only)',
-    description:
-      'Updates any user by their ID. Administrator privileges required. Only provided fields will be updated.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'UUID of the user to update',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'User updated successfully',
-    schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', example: '123e4567-e89b-12d3-a456-426614174000' },
-        username: { type: 'string', example: 'johndoe' },
-        displayName: { type: 'string', example: 'John Doe' },
-        email: { type: 'string', example: 'john.doe@example.com' },
-        role: { type: 'string', example: 'Member' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad request - Validation failed or field already taken',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 400 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: ['Username is already taken'],
-        },
-        error: { type: 'string', example: 'Bad Request' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - Administrator privileges required',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 403 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: ['Access denied. Administrator privileges required.'],
-        },
-        error: { type: 'string', example: 'Forbidden' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'User not found',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 404 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: [
-            'User with id 123e4567-e89b-12d3-a456-426614174000 not found',
-          ],
-        },
-        error: { type: 'string', example: 'Not Found' },
-      },
-    },
-  })
-  updateUser(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.updateUser(id, updateUserDto);
-  }
+  // Admin endpoint moved to: /v1/admin/users/:id (PATCH)
+  // See: backend/src/security/admin/services/users/users.controller.ts
 
   // #########################################################
   // DELETE OPTIONS - AFTER UPDATE OPTIONS - ALWAYS AT END
@@ -534,66 +452,8 @@ export class UsersController {
     return this.usersService.delete(userId);
   }
 
-  @Delete(':id')
-  @UseGuards(AdminGuard)
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Delete user by ID (admin only)',
-    description:
-      'Permanently deletes a user account and all associated data by ID (hard delete). Administrator privileges required. This action cannot be undone.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'UUID of the user to delete',
-    example: '123e4567-e89b-12d3-a456-426614174000',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'User deleted successfully',
-    schema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', example: 'User deleted successfully' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - Administrator privileges required',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 403 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: ['Access denied. Administrator privileges required.'],
-        },
-        error: { type: 'string', example: 'Forbidden' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'User not found',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 404 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: [
-            'User with id 123e4567-e89b-12d3-a456-426614174000 not found',
-          ],
-        },
-        error: { type: 'string', example: 'Not Found' },
-      },
-    },
-  })
-  deleteUser(@Param('id') id: string) {
-    return this.usersService.delete(id);
-  }
+  // Admin endpoint moved to: /v1/admin/users/:id (DELETE)
+  // See: backend/src/security/admin/services/users/users.controller.ts
 
   // #########################################################
   // VIEW TRACKING
@@ -623,34 +483,4 @@ export class UsersController {
     return this.usersService.trackProfileView(id, req, viewerUserId);
   }
 
-  @Get(':id/analytics/geographic')
-  @RequireScope('read:analytics')
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Get geographic analytics',
-    description: 'Returns geographic analytics including top countries for profile views.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'User ID to get analytics for',
-    type: 'string',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Geographic analytics retrieved successfully',
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - User can only view their own analytics',
-  })
-  async getGeographicAnalytics(
-    @Param('id') id: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    const userId = req.user?.id;
-    if (!userId || userId !== id) {
-      throw new UnauthorizedException('You can only view your own analytics');
-    }
-    return this.usersService.getGeographicAnalytics(id);
-  }
 }

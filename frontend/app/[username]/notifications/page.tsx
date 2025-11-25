@@ -24,7 +24,7 @@ import {
   SparklesIcon,
   ArrowRightIcon,
 } from 'lucide-react';
-import { NotificationType } from '@/core/api/notifications';
+import { NotificationType } from '@/core/api/users/notifications';
 
 // Notification type icons mapping
 const getNotificationIcon = (type: NotificationType) => {
@@ -104,9 +104,12 @@ function NotificationsPageContent() {
   // Filter notifications client-side (no database queries for filters)
   const notifications = useMemo(() => {
     if (!allNotifications || allNotifications.length === 0) return [];
-    
+
     let filtered = allNotifications;
-    
+
+    // Exclude admin-only notifications (CONTENT_REPORT) from regular user notifications
+    filtered = filtered.filter((n) => n.type !== NotificationType.CONTENT_REPORT);
+
     // Apply filter
     if (filter === 'unread') {
       filtered = filtered.filter((n) => !n.isRead);
@@ -118,7 +121,7 @@ function NotificationsPageContent() {
       const filterType = String(filter);
       filtered = filtered.filter((n) => String(n.type) === filterType);
     }
-    
+
     return filtered;
   }, [allNotifications, filter]);
 
@@ -142,7 +145,7 @@ function NotificationsPageContent() {
       cancelLabel: 'Cancel',
       variant: 'destructive',
     });
-    
+
     if (confirmed) {
       deleteAllRead();
     }

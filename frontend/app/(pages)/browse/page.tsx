@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { followsService } from '@/core/api/follows';
-import { userService } from '@/core/api/user';
+import { followsService } from '@/core/api/users/follows';
+import { userService } from '@/core/api/users/user';
 import { Card, CardContent, CardHeader } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import { Input } from '@/theme/ui/input';
@@ -16,7 +16,10 @@ import {
   SearchIcon,
   UsersIcon,
 } from 'lucide-react';
-import type { User } from '@/core/api/user/types/user.type';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faUsers, faStar } from '@fortawesome/free-solid-svg-icons';
+import { cn } from '@/lib/utils';
+import type { User } from '@/core/api/users/user/types/user.type';
 
 // Date formatting helper
 const formatTimeAgo = (date: string) => {
@@ -67,10 +70,10 @@ function UsersBrowse({
   setPage: (page: number | ((prev: number) => number)) => void;
   limit: number;
 }) {
-  const { user: currentUser, isAuthenticated } = useAuth();
+  const { user: currentUser, isAuthenticated, isInitializing } = useAuth();
   const queryClient = useQueryClient();
 
-  // Fetch all users
+  // Fetch all users (public endpoint)
   const {
     data: usersData,
     isLoading: isLoadingUsers,
@@ -80,7 +83,7 @@ function UsersBrowse({
     queryFn: async () => {
       return userService.getAll({ page, limit });
     },
-    enabled: true,
+    enabled: !isInitializing,
   });
 
   // Fetch follow suggestions if authenticated
@@ -98,8 +101,12 @@ function UsersBrowse({
     setPage(1);
   };
 
-  // Filter users by search query if provided
+  // Filter users by search query if provided, and hide private profiles
   const filteredUsers = usersData?.data.filter((user) => {
+    // Hide private profiles (not follower-only or subscriber-only)
+    const isPrivate = user.isPublic === false && !user.privacy?.isFollowerOnly && !user.privacy?.isSubscriberOnly;
+    if (isPrivate) return false;
+
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -171,7 +178,13 @@ function UsersBrowse({
       )}
 
       {/* Users List */}
-      {isLoadingUsers ? (
+      {isInitializing ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground">Loading...</p>
+          </CardContent>
+        </Card>
+      ) : isLoadingUsers ? (
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">Loading users...</p>
@@ -229,6 +242,12 @@ function UserCard({ user, isSuggestion = false }: { user: User & { mutualConnect
   const avatar = user.profile?.avatar;
   const isOwnProfile = currentUser?.id === user.id;
 
+  // Check privacy settings
+  const isFollowerOnly = user.privacy?.isFollowerOnly === true;
+  const isSubscriberOnly = user.privacy?.isSubscriberOnly === true;
+  // TODO: Add subscription status check when subscription service is available
+  const isSubscribed = false; // Placeholder until subscription status is available
+
   const followMutation = useMutation({
     mutationFn: async (shouldFollow: boolean) => {
       if (shouldFollow) {
@@ -241,6 +260,7 @@ function UserCard({ user, isSuggestion = false }: { user: User & { mutualConnect
       queryClient.invalidateQueries({ queryKey: ['users', 'browse'] });
       queryClient.invalidateQueries({ queryKey: ['follows', 'suggestions'] });
       queryClient.invalidateQueries({ queryKey: ['user', 'profile', user.username] });
+      queryClient.invalidateQueries({ queryKey: ['follow', 'status', user.id] });
     },
   });
 
@@ -267,9 +287,79 @@ function UserCard({ user, isSuggestion = false }: { user: User & { mutualConnect
     followMutation.mutate(newFollowState);
   };
 
+  // Determine if we should show the restricted card
+  // Only show if user has restriction AND current user is NOT following/subscribed
+  const shouldShowRestrictedCard =
+    (isFollowerOnly && !isFollowing) ||
+    (isSubscriberOnly && !isSubscribed && !isFollowing); // TODO: Add subscription check when available
+
+  // Determine card color and notice
+  let cardColor = '';
+  let noticeText = '';
+  let noticeIcon = null;
+
+  if (isSubscriberOnly && !isSubscribed && !isFollowing) {
+    cardColor = 'pink';
+    noticeText = 'Subscriber Only';
+    noticeIcon = faStar;
+  } else if (isFollowerOnly && !isFollowing) {
+    cardColor = 'blue';
+    noticeText = 'Followers Only';
+    noticeIcon = faUsers;
+  }
+
+  // Color classes for restricted cards
+  const cardBorderColor = cardColor === 'pink'
+    ? 'border-pink-500/30'
+    : cardColor === 'blue'
+    ? 'border-blue-500/30'
+    : '';
+
+  const cardBgColor = cardColor === 'pink'
+    ? 'bg-gradient-to-br from-card via-pink-500/5 to-card'
+    : cardColor === 'blue'
+    ? 'bg-gradient-to-br from-card via-blue-500/5 to-card'
+    : '';
+
+  const noticeBgColor = cardColor === 'pink'
+    ? 'bg-pink-500/10 border-pink-500/20'
+    : cardColor === 'blue'
+    ? 'bg-blue-500/10 border-blue-500/20'
+    : '';
+
+  const noticeTextColor = cardColor === 'pink'
+    ? 'text-pink-500'
+    : cardColor === 'blue'
+    ? 'text-blue-500'
+    : '';
+
+  const noticeIconColor = cardColor === 'pink'
+    ? 'text-pink-500'
+    : cardColor === 'blue'
+    ? 'text-blue-500'
+    : '';
+
   return (
-    <Card className="hover:shadow-lg transition-all duration-300">
-      <CardContent className="pt-6">
+    <Card className={cn(
+      "hover:shadow-lg transition-all duration-300 relative overflow-hidden",
+      shouldShowRestrictedCard && cardBorderColor && "border-2",
+      shouldShowRestrictedCard && cardBgColor
+    )}>
+      {shouldShowRestrictedCard && noticeIcon && (
+        <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-10 overflow-hidden">
+          <div className={cn(
+            "absolute top-8 -left-9 w-[175px] h-7",
+            "transform rotate-[-45deg] shadow-lg",
+            "flex items-center justify-center",
+            noticeBgColor
+          )}>
+            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none whitespace-nowrap", noticeTextColor)}>
+              {noticeText}
+            </span>
+          </div>
+        </div>
+      )}
+      <CardContent className="pt-6 relative z-0">
         <div className="flex flex-col items-center text-center space-y-4">
           <Link href={`/${user.username || ''}`}>
             <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden">

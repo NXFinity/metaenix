@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -14,24 +15,16 @@ import {
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { PostsService } from './posts.service';
-import { CommentsService } from 'src/services/comments/comments.service';
-import { LikesService } from 'src/services/likes/likes.service';
-import { SharesService } from 'src/services/shares/shares.service';
 import {
   CreatePostDto,
   UpdatePostDto,
-  CreateShareDto,
 } from './assets/dto/createPost.dto';
-import { CreateCommentDto } from 'src/services/comments/assets/dto/create-comment.dto';
-import { UpdateCommentDto } from 'src/services/comments/assets/dto/update-comment.dto';
-import { CommentResourceType } from 'src/services/comments/assets/enum/resource-type.enum';
-import { LikeResourceType } from 'src/services/likes/assets/enum/resource-type.enum';
-import { ShareResourceType } from 'src/services/shares/assets/enum/resource-type.enum';
 import {
   BookmarkPostDto,
   ReportPostDto,
   ReactToPostDto,
   CreateCollectionDto,
+  UpdateCollectionDto,
   SchedulePostDto,
 } from './assets/dto/post-features.dto';
 import {
@@ -60,9 +53,6 @@ import { RequireScope } from 'src/security/developer/services/scopes/decorators/
 export class PostsController {
   constructor(
     private readonly postsService: PostsService,
-    private readonly commentsService: CommentsService,
-    private readonly likesService: LikesService,
-    private readonly sharesService: SharesService,
   ) {}
 
   // #########################################################
@@ -213,104 +203,6 @@ export class PostsController {
     );
   }
 
-  @Post(':postId/comments')
-  @RequireScope('write:comments')
-  @Throttle({ limit: 20, ttl: 60 }) // 20 comments per minute
-  @ApiOperation({ summary: 'Create a comment on a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiBody({ type: CreateCommentDto })
-  @ApiResponse({
-    status: 201,
-    description: 'Comment created successfully',
-  })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Comments disabled' })
-  @ApiResponse({ status: 404, description: 'Post not found' })
-  createComment(
-    @CurrentUser() user: User,
-    @Param('postId') postId: string,
-    @Body() createCommentDto: CreateCommentDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.commentsService.createComment(
-      userId,
-      CommentResourceType.POST,
-      postId,
-      createCommentDto,
-    );
-  }
-
-  @Post(':postId/like')
-  @RequireScope('write:posts')
-  @ApiOperation({ summary: 'Like a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiResponse({
-    status: 201,
-    description: 'Post liked successfully',
-  })
-  @ApiResponse({ status: 400, description: 'Already liked' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Post not found' })
-  async likePost(@CurrentUser() user: User, @Param('postId') postId: string) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    await this.likesService.likeResource(userId, LikeResourceType.POST, postId);
-    return { message: 'Post liked successfully', liked: true };
-  }
-
-  @Delete(':postId/like')
-  @RequireScope('write:posts')
-  @ApiOperation({ summary: 'Unlike a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Post unliked successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Like not found' })
-  async unlikePost(@CurrentUser() user: User, @Param('postId') postId: string) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    await this.likesService.unlikeResource(userId, LikeResourceType.POST, postId);
-    return { message: 'Post unliked successfully', liked: false };
-  }
-
-  @Post(':postId/share')
-  @RequireScope('write:posts')
-  @ApiOperation({ summary: 'Share a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiBody({ type: CreateShareDto })
-  @ApiResponse({
-    status: 201,
-    description: 'Post shared successfully',
-  })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Post not found' })
-  sharePost(
-    @CurrentUser() user: User,
-    @Param('postId') postId: string,
-    @Body() createShareDto: CreateShareDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.sharesService.shareResource(
-      userId,
-      ShareResourceType.POST,
-      postId,
-      createShareDto,
-    );
-  }
 
   // #########################################################
   // FIND OPTIONS
@@ -397,27 +289,6 @@ export class PostsController {
     return this.postsService.findByUserId(targetUserId, paginationDto, userId);
   }
 
-  @Get('bookmarks')
-  @RequireScope('read:posts')
-  @ApiOperation({ summary: 'Get user\'s bookmarked posts' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiResponse({
-    status: 200,
-    description: 'Bookmarked posts retrieved successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  getBookmarkedPosts(
-    @CurrentUser() user: User,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.postsService.getBookmarkedPosts(userId, paginationDto);
-  }
-
   @Get('likes')
   @RequireScope('read:posts')
   @ApiOperation({ summary: 'Get user\'s liked posts' })
@@ -439,17 +310,17 @@ export class PostsController {
     return this.postsService.getLikedPosts(userId, paginationDto);
   }
 
-  @Get('shares')
+  @Get('bookmarks')
   @RequireScope('read:posts')
-  @ApiOperation({ summary: 'Get user\'s shared posts' })
+  @ApiOperation({ summary: 'Get user\'s bookmarked posts' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({
     status: 200,
-    description: 'Shared posts retrieved successfully',
+    description: 'Bookmarked posts retrieved successfully',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  getSharedPosts(
+  getBookmarkedPosts(
     @CurrentUser() user: User,
     @Query() paginationDto: PaginationDto,
   ) {
@@ -457,8 +328,9 @@ export class PostsController {
     if (!userId) {
       throw new UnauthorizedException('User ID not found');
     }
-    return this.postsService.getSharedPosts(userId, paginationDto);
+    return this.postsService.getBookmarkedPosts(userId, paginationDto);
   }
+
 
   @Get('search')
   @Public()
@@ -500,6 +372,27 @@ export class PostsController {
   ) {
     const userId = user?.id;
     return this.postsService.filterPostsByType(type, paginationDto, userId);
+  }
+
+  @Get('collections')
+  @RequireScope('read:posts')
+  @ApiOperation({ summary: 'Get all collections for the current user' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiResponse({
+    status: 200,
+    description: 'Collections retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getUserCollections(
+    @CurrentUser() user: User,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.getUserCollections(userId, paginationDto);
   }
 
   @Get('collections/:collectionId/posts')
@@ -561,114 +454,18 @@ export class PostsController {
   @Public()
   @RequireScope('read:posts') // Required for OAuth tokens accessing private posts
   @ApiOperation({ summary: 'Get a single post by ID' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
+  @ApiParam({ name: 'postId', description: 'Post ID (UUID)' })
   @ApiResponse({
     status: 200,
     description: 'Post retrieved successfully',
   })
+  @ApiResponse({ status: 400, description: 'Invalid post ID format' })
   @ApiResponse({ status: 404, description: 'Post not found' })
-  findOne(@Param('postId') postId: string, @CurrentUser() user?: any) {
+  findOne(@Param('postId', ParseUUIDPipe) postId: string, @CurrentUser() user?: any) {
     const userId = user?.id;
     return this.postsService.findOne(postId, userId);
   }
 
-  @Get('comments/:commentId')
-  @RequireScope('read:comments')
-  @ApiOperation({ summary: 'Get a comment by ID' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Comment retrieved successfully',
-  })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  findCommentById(@Param('commentId') commentId: string) {
-    return this.commentsService.getCommentById(commentId);
-  }
-
-  @Get('comments/:commentId/replies')
-  @RequireScope('read:comments')
-  @ApiOperation({ summary: 'Get replies to a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'sortBy', required: false, type: String })
-  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
-  @ApiResponse({
-    status: 200,
-    description: 'Comment replies retrieved successfully',
-  })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  findRepliesByCommentId(@Param('commentId') commentId: string) {
-    // Replies are already included in getCommentById, but we can return them separately if needed
-    // For now, just return the comment which includes its replies
-    return this.commentsService.getCommentById(commentId);
-  }
-
-  @Get(':postId/comments')
-  @Public()
-  @RequireScope('read:comments') // Required for OAuth tokens accessing private post comments
-  @ApiOperation({ summary: 'Get comments for a post' })
-  @ApiParam({ name: 'postId', description: 'Post ID' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'sortBy', required: false, type: String })
-  @ApiQuery({ name: 'sortOrder', required: false, enum: ['ASC', 'DESC'] })
-  @ApiResponse({
-    status: 200,
-    description: 'Comments retrieved successfully',
-  })
-  @ApiResponse({ status: 403, description: 'Forbidden - Post is private' })
-  @ApiResponse({ status: 404, description: 'Post not found' })
-  findCommentsByPostId(
-    @Param('postId') postId: string,
-    @Query() paginationDto: PaginationDto,
-  ) {
-    return this.commentsService.getComments(
-      CommentResourceType.POST,
-      postId,
-      paginationDto,
-    );
-  }
-
-  @Post('comments/:commentId/like')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'Like a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiResponse({
-    status: 201,
-    description: 'Comment liked successfully',
-  })
-  @ApiResponse({ status: 400, description: 'Already liked' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  likeComment(@CurrentUser() user: User, @Param('commentId') commentId: string) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.likesService.likeResource(userId, LikeResourceType.COMMENT, commentId);
-  }
-
-  @Delete('comments/:commentId/like')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'Unlike a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Comment unliked successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Like not found' })
-  unlikeComment(
-    @CurrentUser() user: User,
-    @Param('commentId') commentId: string,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.likesService.unlikeResource(userId, LikeResourceType.COMMENT, commentId);
-  }
 
   // #########################################################
   // UPDATE OPTIONS
@@ -733,29 +530,6 @@ export class PostsController {
     return this.postsService.togglePinPost(userId, postId, isPinned);
   }
 
-  @Patch('comments/:commentId')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'Update a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiBody({ type: UpdateCommentDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Comment updated successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  updateComment(
-    @CurrentUser() user: User,
-    @Param('commentId') commentId: string,
-    @Body() updateCommentDto: UpdateCommentDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.commentsService.updateComment(userId, commentId, updateCommentDto);
-  }
 
   // #########################################################
   // DELETE OPTIONS
@@ -780,27 +554,6 @@ export class PostsController {
     return this.postsService.deletePost(userId, postId);
   }
 
-  @Delete('comments/:commentId')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'Delete a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Comment deleted successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  deleteComment(
-    @CurrentUser() user: User,
-    @Param('commentId') commentId: string,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.commentsService.deleteComment(userId, commentId);
-  }
 
   // #########################################################
   // BOOKMARK OPTIONS
@@ -933,54 +686,6 @@ export class PostsController {
     return this.postsService.removeReaction(userId, postId);
   }
 
-  @Post('comments/:commentId/react')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'React to a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiBody({ type: ReactToPostDto })
-  @ApiResponse({
-    status: 201,
-    description: 'Reaction added successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Comment not found' })
-  reactToComment(
-    @CurrentUser() user: User,
-    @Param('commentId') commentId: string,
-    @Body() reactDto: ReactToPostDto,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.postsService.reactToPostOrComment(
-      userId,
-      reactDto.reactionType,
-      undefined,
-      commentId,
-    );
-  }
-
-  @Delete('comments/:commentId/react')
-  @RequireScope('write:comments')
-  @ApiOperation({ summary: 'Remove reaction from a comment' })
-  @ApiParam({ name: 'commentId', description: 'Comment ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Reaction removed successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Reaction not found' })
-  removeReactionFromComment(
-    @CurrentUser() user: User,
-    @Param('commentId') commentId: string,
-  ) {
-    const userId = user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.postsService.removeReaction(userId, undefined, commentId);
-  }
 
   // #########################################################
   // COLLECTION OPTIONS
@@ -1009,6 +714,37 @@ export class PostsController {
       createCollectionDto.description,
       createCollectionDto.isPublic,
       createCollectionDto.coverImage,
+    );
+  }
+
+  @Patch('collections/:collectionId')
+  @RequireScope('write:posts')
+  @ApiOperation({ summary: 'Update a collection' })
+  @ApiParam({ name: 'collectionId', description: 'Collection ID' })
+  @ApiBody({ type: UpdateCollectionDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Collection updated successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Collection not found' })
+  updateCollection(
+    @CurrentUser() user: User,
+    @Param('collectionId') collectionId: string,
+    @Body() updateCollectionDto: UpdateCollectionDto,
+  ) {
+    const userId = user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('User ID not found');
+    }
+    return this.postsService.updateCollection(
+      userId,
+      collectionId,
+      updateCollectionDto.name,
+      updateCollectionDto.description,
+      updateCollectionDto.isPublic,
+      updateCollectionDto.coverImage,
     );
   }
 

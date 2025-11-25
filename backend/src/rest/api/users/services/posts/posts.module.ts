@@ -16,6 +16,7 @@ import { StorageModule } from 'src/rest/storage/storage.module';
 import { PostsGateway } from './posts.gateway';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { VideosModule } from '../videos/videos.module';
+import { PhotosModule } from '../photos/photos.module';
 import { TrackingModule } from 'src/services/tracking/tracking.module';
 import { AnalyticsModule } from 'src/services/analytics/analytics.module';
 import { CommentsModule } from 'src/services/comments/comments.module';
@@ -41,6 +42,7 @@ import { HttpModule } from '@nestjs/axios';
     StorageModule,
     EventEmitterModule,
     VideosModule,
+    PhotosModule,
     TrackingModule,
     AnalyticsModule,
     CommentsModule,

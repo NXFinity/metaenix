@@ -35,6 +35,11 @@ import {
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
 } from '../../common/constants/app.constants';
 import { doubleCsrf } from 'csrf-csrf';
+import { CreateAdminSessionDto } from './dto/create-admin-session.dto';
+import { AdminGuard } from './guards/admin.guard';
+import { AuthGuard } from './guards/auth.guard';
+import { UseGuards } from '@nestjs/common';
+import { CurrentUser } from './decorators/currentUser.decorator';
 
 @ApiTags('Security Management | Authentication')
 @Controller('auth')
@@ -670,5 +675,40 @@ export class AuthController {
     const token = csrfProtection.generateCsrfToken(req, res);
     
     return res.json({ csrfToken: token });
+  }
+
+  // #########################################################
+  // ADMIN SESSION AUTHENTICATION
+  // #########################################################
+
+  @Post('admin/session/create')
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create admin session token for cross-app authentication' })
+  @ApiResponse({ status: 200, description: 'Admin session token created successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - authentication required' })
+  @ApiResponse({ status: 403, description: 'Access denied. Administrator privileges required.' })
+  @ApiBearerAuth()
+  async createAdminSession(@CurrentUser() user: any) {
+    const result = await this.authService.createAdminSession(user.id);
+    return {
+      message: 'Admin session token created successfully',
+      ...result,
+    };
+  }
+
+  @Post('admin/session/exchange')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange admin session token for admin authentication tokens' })
+  @ApiResponse({ status: 200, description: 'Admin session exchanged successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired admin session token' })
+  @ApiBody({ type: CreateAdminSessionDto })
+  async exchangeAdminSession(@Body() dto: CreateAdminSessionDto) {
+    const result = await this.authService.exchangeAdminSession(dto.sessionToken);
+    return {
+      message: 'Admin session exchanged successfully',
+      ...result,
+    };
   }
 }

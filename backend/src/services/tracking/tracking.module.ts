@@ -5,12 +5,13 @@ import { TrackingController } from './tracking.controller';
 import { ViewTrack } from './assets/entities/view-track.entity';
 import { Post } from '../../rest/api/users/services/posts/assets/entities/post.entity';
 import { Video } from '../../rest/api/users/services/videos/assets/entities/video.entity';
+import { Photo } from '../../rest/api/users/services/photos/assets/entities/photo.entity';
 import { LoggingModule } from '@logging/logging';
 import { AnalyticsModule } from '../analytics/analytics.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ViewTrack, Post, Video]),
+    TypeOrmModule.forFeature([ViewTrack, Post, Video, Photo]),
     LoggingModule,
     AnalyticsModule,
   ],

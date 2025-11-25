@@ -10,19 +10,19 @@ import { Label } from '@/theme/ui/label';
 import { Textarea } from '@/theme/ui/textarea';
 import { Checkbox } from '@/theme/ui/checkbox';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { developerService } from '@/core/api/developer';
+import { developerService } from '@/core/api/security/developer';
 import { storageService } from '@/core/api/storage';
 import { StorageType } from '@/core/api/storage/types/storage.type';
-import { oauthService } from '@/core/api/oauth';
-import type { ScopeDefinition } from '@/core/api/oauth/types/oauth.type';
-import { GrantType } from '@/core/api/oauth/types/oauth.type';
+import { oauthService } from '@/core/api/security/oauth';
+import type { ScopeDefinition } from '@/core/api/security/oauth/types/oauth.type';
+import { GrantType } from '@/core/api/security/oauth/types/oauth.type';
 import type {
   DeveloperStatus,
   Application,
   CreateApplicationRequest,
   UpdateApplicationRequest,
-} from '@/core/api/developer/types/developer.type';
-import { ApplicationEnvironment } from '@/core/api/developer/types/developer.type';
+} from '@/core/api/security/developer/types/developer.type';
+import { ApplicationEnvironment } from '@/core/api/security/developer/types/developer.type';
 import { ArrowLeftIcon, PlusIcon, TrashIcon, CopyIcon, EyeIcon, EyeOffIcon, RefreshCwIcon, XIcon, UploadIcon } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -123,7 +123,7 @@ export default function DeveloperPage() {
       queryClient.invalidateQueries({ queryKey: ['developer', 'applications'] });
     },
     onError: (error: any) => {
-      showNotification('error', error?.response?.data?.message || 'Failed to create application');
+      showNotification('error', error?.response?.data?.message || 'Failed to upload application');
     },
   });
 
@@ -840,7 +840,7 @@ function CreateApplicationDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Upload icon if file is selected but URL is not set
     let iconUrl = formData.iconUrl;
     if (formData.iconFile && !iconUrl) {

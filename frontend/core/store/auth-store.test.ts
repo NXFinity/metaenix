@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useAuthStore } from './auth-store';
-import type { User } from '@/core/api/user';
+import type { User } from '@/core/api/users/user';
 
 describe('useAuthStore', () => {
   beforeEach(() => {

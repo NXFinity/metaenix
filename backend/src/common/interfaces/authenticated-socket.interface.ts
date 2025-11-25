@@ -20,5 +20,10 @@ export interface AuthenticatedSocket extends Socket {
    * Authenticated user object
    */
   user?: User;
+
+  /**
+   * Socket ID (for compatibility)
+   */
+  id: string;
 }
 

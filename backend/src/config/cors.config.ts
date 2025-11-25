@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 // Default localhost origins for development
 const defaultLocalOrigins = [
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:3021',
   'http://localhost:4200',
 ];

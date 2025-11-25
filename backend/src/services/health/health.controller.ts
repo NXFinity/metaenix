@@ -11,11 +11,13 @@ import { RedisService } from '@redis/redis';
 import { SecurityMonitorService } from '../../common/monitoring/security-monitor.service';
 import { ConfigService } from '@nestjs/config';
 import { ApiUsageAnalyticsService } from './api-usage-analytics.service';
+import { Public } from '../../security/auth/decorators/public.decorator';
 import * as os from 'os';
 import * as process from 'process';
 
 @ApiTags('Health Management | Monitoring')
 @Controller('health')
+@Public() // All health endpoints are public
 export class HealthController {
   private readonly startTime = Date.now();
 
@@ -83,12 +85,18 @@ export class HealthController {
       () => this.memory.checkHeap('memory_heap', 300 * 1024 * 1024), // 300MB threshold
       () => this.memory.checkRSS('memory_rss', 500 * 1024 * 1024), // 500MB threshold
 
-      // Disk health check
-      () =>
-        this.disk.checkStorage('disk', {
-          path: '/',
+      // Disk health check - use platform-appropriate path
+      () => {
+        // On Windows, use the root of the current drive (e.g., C:\)
+        // On Unix-like systems, use /
+        const diskPath = os.platform() === 'win32' 
+          ? process.cwd().substring(0, 3) // Gets "C:\" or "F:\" etc.
+          : '/';
+        return this.disk.checkStorage('disk', {
+          path: diskPath,
           thresholdPercent: 0.9, // Alert if disk usage exceeds 90%
-        }),
+        });
+      },
 
       // Redis health check (custom)
       async () => {
@@ -387,9 +395,14 @@ export class HealthController {
     threshold: number;
   }> {
     try {
+      // Use platform-appropriate path
+      const diskPath = os.platform() === 'win32' 
+        ? process.cwd().substring(0, 3) // Gets "C:\" or "F:\" etc.
+        : '/';
+      
       // Check disk storage health (throws if threshold exceeded)
       await this.disk.checkStorage('disk', {
-        path: '/',
+        path: diskPath,
         thresholdPercent: 0.9,
       });
 
@@ -398,7 +411,7 @@ export class HealthController {
       // For now, return safe defaults indicating disk is healthy
       return {
         status: 'up',
-        path: '/',
+        path: diskPath,
         total: 0, // Would need fs.statfs to get actual disk space
         free: 0,
         used: 0,

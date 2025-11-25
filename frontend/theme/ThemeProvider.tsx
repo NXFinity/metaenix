@@ -32,9 +32,14 @@ export function ThemeProvider({
     const storedTheme = localStorage.getItem(storageKey) as Theme | null;
     const initialTheme = storedTheme || defaultTheme;
     
-    if (storedTheme && storedTheme !== theme) {
-      setTheme(storedTheme);
+    if (initialTheme !== theme) {
+      setTheme(initialTheme);
     }
+  }, [storageKey, defaultTheme, theme]);
+
+  // Resolve and apply theme
+  useEffect(() => {
+    if (!mounted) return;
 
     // Resolve system theme
     const resolveTheme = (themeToResolve: Theme): 'dark' | 'light' => {
@@ -46,7 +51,7 @@ export function ThemeProvider({
       return themeToResolve;
     };
 
-    const resolved = resolveTheme(initialTheme);
+    const resolved = resolveTheme(theme);
     setResolvedTheme(resolved);
 
     // Apply theme to document immediately
@@ -54,7 +59,7 @@ export function ThemeProvider({
     root.classList.remove('light', 'dark');
     root.classList.add(resolved);
     root.setAttribute('data-theme', resolved);
-  }, [theme, storageKey, defaultTheme]);
+  }, [theme, mounted]);
 
   // Listen for system theme changes
   useEffect(() => {
@@ -75,22 +80,27 @@ export function ThemeProvider({
 
   const handleSetTheme = (newTheme: Theme) => {
     setTheme(newTheme);
-    localStorage.setItem(storageKey, newTheme);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(storageKey, newTheme);
+    }
   };
 
-  // Prevent hydration mismatch
-  if (!mounted) {
-    return <>{children}</>;
-  }
-
-  return (
-    <ThemeContext.Provider
-      value={{
+  // Always provide context, even during SSR
+  // Use default values during SSR to prevent hydration mismatches
+  const contextValue = mounted
+    ? {
         theme,
         setTheme: handleSetTheme,
         resolvedTheme,
-      }}
-    >
+      }
+    : {
+        theme: defaultTheme,
+        setTheme: handleSetTheme,
+        resolvedTheme: defaultTheme === 'system' ? 'dark' : defaultTheme,
+      };
+
+  return (
+    <ThemeContext.Provider value={contextValue}>
       {children}
     </ThemeContext.Provider>
   );

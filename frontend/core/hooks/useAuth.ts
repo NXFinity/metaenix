@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import { authService } from '@/core/api/auth';
+import { authService } from '@/core/api/security/auth';
 import { useAuthStore } from '@/core/store/auth-store';
 import { tokenStorage, migrateLegacyTokens } from '@/lib/auth/token-storage';
 import type {
@@ -13,8 +13,8 @@ import type {
   ForgotPasswordRequest,
   ResetPasswordRequest,
   VerifyLogin2faRequest,
-} from '@/core/api/auth';
-import type { User } from '@/core/api/user';
+} from '@/core/api/security/auth';
+import type { User } from '@/core/api/users/user';
 
 /**
  * Auth Hook Return Type
@@ -82,10 +82,10 @@ export interface UseAuthReturn {
 
 /**
  * Auth Hook
- * 
+ *
  * Provides authentication functionality with TanStack Query integration
  * and Zustand store synchronization.
- * 
+ *
  * Features:
  * - Automatic user data fetching on mount
  * - Login, logout, register mutations
@@ -170,11 +170,17 @@ export const useAuth = (): UseAuthReturn => {
             setIsInitializing(false);
             return;
           }
-        } catch (error) {
-          // Token invalid or expired - clear tokens
+        } catch (error: any) {
+          // Token invalid, expired, or invalidated - clear tokens and logout
           tokenStorage.clearTokens();
           logoutStore();
+          queryClient.clear(); // Clear all queries
           queryClient.setQueryData(['auth', 'me'], null);
+          
+          // Redirect to login if not already there
+          if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+            router.push('/login');
+          }
         }
       } else if (!accessToken && !refreshToken && user) {
         // No tokens but user in store - clear store
@@ -208,11 +214,11 @@ export const useAuth = (): UseAuthReturn => {
         setTempToken(response.tempToken);
         return;
       }
-      
+
       // Login successful - store tokens and fetch full user data
       // Check if using httpOnly cookies (tokens in cookies, not in response)
       const useCookies = process.env.NEXT_PUBLIC_USE_HTTPONLY_COOKIES === 'true';
-      
+
       if (response.user) {
         // If using cookies, tokens are already set by backend in httpOnly cookies
         // If not using cookies, store tokens from response
@@ -220,7 +226,7 @@ export const useAuth = (): UseAuthReturn => {
           tokenStorage.setAccessToken(response.accessToken);
           tokenStorage.setRefreshToken(response.refreshToken);
         }
-        
+
         // Fetch full user data with all relations (profile, privacy, security)
         try {
           const fullUser = await authService.getMe();
@@ -255,7 +261,7 @@ export const useAuth = (): UseAuthReturn => {
     },
     onSuccess: async (response) => {
       const useCookies = process.env.NEXT_PUBLIC_USE_HTTPONLY_COOKIES === 'true';
-      
+
       if (response.user) {
         // If using cookies, tokens are already set by backend in httpOnly cookies
         // If not using cookies, store tokens from response
@@ -263,7 +269,7 @@ export const useAuth = (): UseAuthReturn => {
           tokenStorage.setAccessToken(response.accessToken);
           tokenStorage.setRefreshToken(response.refreshToken);
         }
-        
+
         // Fetch full user data with all relations (profile, privacy, security)
         try {
           const fullUser = await authService.getMe();
@@ -310,7 +316,7 @@ export const useAuth = (): UseAuthReturn => {
       // Invalidate and refetch full user data to get updated security status
       queryClient.invalidateQueries({ queryKey: ['auth', 'me'] });
       queryClient.invalidateQueries({ queryKey: ['auth'] });
-      
+
       // Refetch full user data with all relations (profile, privacy, security)
       try {
         const fullUser = await authService.getMe();

@@ -121,6 +121,48 @@ export class CreateCollectionDto {
   coverImage?: string;
 }
 
+export class UpdateCollectionDto {
+  @ApiProperty({
+    description: 'Collection name',
+    example: 'My Favorite Posts',
+    maxLength: 200,
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @MinLength(1)
+  name?: string;
+
+  @ApiProperty({
+    description: 'Collection description',
+    example: 'A collection of my favorite posts',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @ApiProperty({
+    description: 'Whether the collection is public',
+    example: false,
+    required: false,
+  })
+  @IsOptional()
+  isPublic?: boolean;
+
+  @ApiProperty({
+    description: 'Cover image URL for the collection',
+    example: 'https://example.com/cover.jpg',
+    required: false,
+  })
+  @IsOptional()
+  @IsUrl()
+  @MaxLength(500)
+  coverImage?: string;
+}
+
 export class SchedulePostDto {
   @ApiProperty({
     description: 'Date and time to publish the post',

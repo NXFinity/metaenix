@@ -18,6 +18,7 @@ import { sanitizeText } from 'src/utils/sanitization.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Post } from '../../rest/api/users/services/posts/assets/entities/post.entity';
 import { Video } from '../../rest/api/users/services/videos/assets/entities/video.entity';
+import { Photo } from '../../rest/api/users/services/photos/assets/entities/photo.entity';
 import { User } from '../../rest/api/users/assets/entities/user.entity';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import {
@@ -37,6 +38,8 @@ export class CommentsService {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
+    @InjectRepository(Photo)
+    private readonly photoRepository: Repository<Photo>,
     private readonly dataSource: DataSource,
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
@@ -79,6 +82,21 @@ export class CommentsService {
           exists: true,
           allowComments: true,
           ownerId: video.userId,
+        };
+
+      case CommentResourceType.PHOTO:
+        const photo = await this.photoRepository.findOne({
+          where: { id: resourceId, dateDeleted: IsNull() },
+          select: ['id', 'userId', 'isPublic'],
+        });
+        if (!photo) {
+          return { exists: false };
+        }
+        // Photos always allow comments (for now)
+        return {
+          exists: true,
+          allowComments: true,
+          ownerId: photo.userId,
         };
 
       default:

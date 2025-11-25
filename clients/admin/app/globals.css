@@ -1,0 +1,54 @@
+@import "@radix-ui/themes/styles.css";
+@import "tailwindcss";
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.99 0.002 247.858);
+  --foreground: oklch(0.15 0.02 264.695);
+  --primary: oklch(0.6527 0.2354 33.88); /* Brand Orange #ff3c00 */
+  --primary-foreground: oklch(0.99 0.002 247.858);
+  --border: oklch(0.90 0.015 255.508);
+}
+
+.dark {
+  --background: oklch(0.12 0.015 264.695);
+  --foreground: oklch(0.98 0.003 247.858);
+  --primary: oklch(0.7527 0.2654 33.88); /* Brand Orange #ff3c00 (dark mode) */
+  --primary-foreground: oklch(0.98 0.003 247.858);
+  --border: oklch(0.25 0.03 260.031);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+  font-size: 1rem;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+html ::-webkit-scrollbar {
+  width: 0;
+  background: transparent;
+}

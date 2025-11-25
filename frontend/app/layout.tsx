@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/theme/ThemeProvider";
 import { MainLayout } from "@/theme/layout/MainLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AlertsProvider } from "@/theme/components/alerts";
+import { PerformanceMonitor } from "@/core/components/PerformanceMonitor";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,12 +25,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <ErrorBoundary>
           <Providers>
             <ThemeProvider defaultTheme="dark">
               <AlertsProvider>
+                <PerformanceMonitor />
                 <MainLayout>
                   {children}
                 </MainLayout>

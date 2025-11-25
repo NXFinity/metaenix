@@ -173,9 +173,9 @@ export function AlertsProvider({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => dismissAlert(alert.id)}
                 className="text-white/80 hover:text-white transition-colors"
-                aria-label="Dismiss"
+                aria-label={`Dismiss ${alert.title} notification`}
               >
-                ×
+                <span aria-hidden="true">×</span>
               </button>
             </div>
           );

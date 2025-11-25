@@ -3,6 +3,7 @@ import {
   Entity,
   Index,
   JoinColumn,
+  JoinTable,
   ManyToMany,
   ManyToOne,
 } from 'typeorm';
@@ -35,6 +36,12 @@ export class Collection extends BaseEntity {
   userId!: string;
 
   @ManyToMany(() => Post, (post) => post.collections)
+  @JoinTable({
+    name: 'postCollectionPosts',
+    schema: 'social',
+    joinColumn: { name: 'collectionId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'postId', referencedColumnName: 'id' },
+  })
   posts!: Post[];
 
   @Column({ type: 'int', default: 0 })

@@ -22,7 +22,7 @@ import {
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { CachingService } from '@caching/caching';
-import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -35,6 +35,7 @@ export class NotificationsService implements OnModuleInit {
     private readonly userRepository: Repository<User>,
     private readonly loggingService: LoggingService,
     private readonly cachingService: CachingService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   onModuleInit() {
@@ -78,6 +79,12 @@ export class NotificationsService implements OnModuleInit {
 
       // Invalidate cache
       await this.cachingService.invalidateByTags(`user:${userId}:notifications`);
+
+      // Emit event for real-time WebSocket notification
+      this.eventEmitter.emit('notification.created', {
+        userId,
+        notification: savedNotification,
+      });
 
       this.loggingService.log('Notification created and persisted', 'NotificationsService', {
         category: LogCategory.USER_MANAGEMENT,

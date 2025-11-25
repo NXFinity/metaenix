@@ -19,7 +19,7 @@ import { ChangeDto } from './dto/change.dto';
 import { ForgotDto } from './dto/forgot.dto';
 import { ResetDto } from './dto/reset.dto';
 import { EmailService } from '@email/email';
-import { LoggingService } from '@logging/logging';
+import { LoggingService, AuditLogService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { User } from '../../rest/api/users/assets/entities/user.entity';
@@ -40,6 +40,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly loggingService: LoggingService,
+    private readonly auditLogService: AuditLogService,
     private readonly twofaService: TwofaService,
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
@@ -61,13 +62,30 @@ export class AuthService {
     // Check if using httpOnly cookies (declare once at top of function)
     const useCookies = this.configService.get<string>('USE_HTTPONLY_COOKIES') === 'true';
 
-    // Generate JWT access token
+    // Get or initialize token version for this user
+    const tokenVersionKey = this.redisService.keyBuilder.build(
+      'auth',
+      'token-version',
+      user.id,
+    );
+    let tokenVersionStr = await this.redisService.get<string>(tokenVersionKey, false);
+    let tokenVersion: number;
+    if (tokenVersionStr === null) {
+      tokenVersion = 1;
+      // Store version with long expiry (1 year)
+      await this.redisService.set(tokenVersionKey, tokenVersion.toString(), 365 * 24 * 60 * 60);
+    } else {
+      tokenVersion = parseInt(tokenVersionStr, 10) || 1;
+    }
+
+    // Generate JWT access token with version
     const payload = {
       sub: user.id,
       email: user.email,
       username: user.username,
       role: user.role,
       websocketId: user.websocketId,
+      tokenVersion,
     };
 
     const accessToken = this.jwtService.sign(payload);
@@ -414,6 +432,16 @@ export class AuthService {
       }
     }
 
+    // Check if user has a websocketId (created during registration)
+    // The websocketId is used to establish WebSocket connections AFTER login
+    // The WebSocket connection is established by the frontend after receiving the login response
+    if (!user.websocketId) {
+      throw new HttpException(
+        'Account configuration error: websocketId missing',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
     // Check if 2FA is enabled
     if (user.security.isTwoFactorEnabled) {
       // Generate temporary token for 2FA verification
@@ -747,6 +775,186 @@ export class AuthService {
 
     return {
       message: 'Password has been reset successfully',
+    };
+  }
+
+  // #########################################################
+  // ADMIN SESSION AUTHENTICATION
+  // #########################################################
+
+  /**
+   * Create an admin session token for cross-app authentication
+   * @param userId - Authenticated user ID (must be admin)
+   * @returns Admin session token
+   */
+  async createAdminSession(userId: string): Promise<{ sessionToken: string; expiresAt: string }> {
+    // Fetch full user entity
+    const user = await this.usersService.findOne(userId);
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    // Verify user is admin
+    const adminRoles = [ROLE.Administrator, ROLE.Founder, ROLE.Chief_Executive];
+    if (!adminRoles.includes(user.role as ROLE)) {
+      throw new HttpException(
+        'Access denied. Administrator privileges required.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Generate session token (short-lived, 15 minutes - just for exchange)
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    // Store session token in Redis
+    const sessionKey = this.redisService.keyBuilder.build(
+      'auth',
+      'admin-session',
+      sessionToken,
+    );
+    await this.redisService.set(
+      sessionKey,
+      JSON.stringify({
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        createdAt: new Date().toISOString(),
+      }),
+      15 * 60, // 15 minutes in seconds
+    );
+
+    // Log admin session creation
+    await this.auditLogService.saveAuditLog({
+      message: `Admin session token created for ${user.username}`,
+      userId: user.id,
+      category: LogCategory.SECURITY,
+      metadata: {
+        action: 'admin_session_create',
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        sessionToken: sessionToken.substring(0, 8) + '...', // Partial token for logging
+      },
+    });
+
+    return {
+      sessionToken,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * Exchange admin session token for admin authentication tokens
+   * @param sessionToken - Admin session token
+   * @returns Admin authentication tokens and user data
+   */
+  async exchangeAdminSession(sessionToken: string): Promise<{
+    adminSessionToken: string;
+    expiresAt: string; // ISO string for frontend
+    user: {
+      id: string;
+      username: string;
+      email: string;
+      role: string;
+    };
+  }> {
+    // Retrieve session from Redis
+    const sessionKey = this.redisService.keyBuilder.build(
+      'auth',
+      'admin-session',
+      sessionToken,
+    );
+    const sessionData = await this.redisService.get<string>(sessionKey, false);
+
+    if (!sessionData) {
+      throw new HttpException(
+        'Invalid or expired admin session token',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    const session = JSON.parse(sessionData);
+
+    // Verify user still exists and is still admin
+    const user = await this.usersService.findOne(session.userId);
+    if (!user) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    const adminRoles = [ROLE.Administrator, ROLE.Founder, ROLE.Chief_Executive];
+    if (!adminRoles.includes(user.role as ROLE)) {
+      throw new HttpException(
+        'User no longer has administrator privileges',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Delete the one-time session token
+    await this.redisService.del(sessionKey);
+
+    // Generate admin session token (long-lived, 24 hours - persists until browser closes)
+    // Client-side will clear from localStorage when page closes
+    const adminSessionToken = this.jwtService.sign(
+      {
+        sub: user.id,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        websocketId: user.websocketId,
+        type: 'admin-session',
+      },
+      {
+        expiresIn: '24h', // 24 hours - persists during work session
+      },
+    );
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Store admin session in Redis for tracking (24 hours)
+    const adminSessionKey = this.redisService.keyBuilder.build(
+      'auth',
+      'admin-active-session',
+      user.id,
+      adminSessionToken.substring(0, 16), // Store partial token for reference
+    );
+    await this.redisService.set(
+      adminSessionKey,
+      JSON.stringify({
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        createdAt: new Date().toISOString(),
+        lastActivity: new Date().toISOString(),
+      }),
+      24 * 60 * 60, // 24 hours in seconds
+    );
+
+    // Log admin session exchange (session established)
+    await this.auditLogService.saveAuditLog({
+      message: `Admin session established for ${user.username}`,
+      userId: user.id,
+      category: LogCategory.SECURITY,
+      metadata: {
+        action: 'admin_session_exchange',
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+
+    return {
+      adminSessionToken,
+      expiresAt: expiresAt.toISOString(), // Convert to ISO string for frontend
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
     };
   }
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { postsService } from '@/core/api/posts';
+import { postsService } from '@/core/api/users/posts';
 import { useAuth } from '@/core/hooks/useAuth';
 import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 import Image from 'next/image';
@@ -19,7 +19,7 @@ import {
   SendIcon,
   XIcon,
 } from 'lucide-react';
-import type { Comment } from '@/core/api/posts';
+import type { Comment } from '@/core/api/users/posts';
 
 // Date formatting helper
 const formatTimeAgo = (date: string) => {

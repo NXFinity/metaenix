@@ -7,6 +7,8 @@ import { User } from '../../../../assets/entities/user.entity';
 @Index(['userId', 'isPublic'])
 @Index(['isPublic', 'dateCreated'])
 @Index(['status', 'dateCreated'])
+// Note: Unique constraint on slug is handled in application logic
+// Partial unique index can be added via migration: CREATE UNIQUE INDEX ... WHERE slug IS NOT NULL
 export class Video extends BaseEntity {
   @Column({ type: 'uuid' })
   userId!: string;
@@ -17,6 +19,9 @@ export class Video extends BaseEntity {
 
   @Column({ type: 'varchar', length: 255 })
   title!: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  slug!: string | null;
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;

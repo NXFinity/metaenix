@@ -1,8 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { postsService } from '@/core/api/posts';
-import { userService } from '@/core/api/user';
+import { postsService } from '@/core/api/users/posts';
+import { userService } from '@/core/api/users/user';
 import { Card, CardContent } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import { useState } from 'react';

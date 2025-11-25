@@ -16,6 +16,7 @@ import { NotificationsModule } from './services/notifications/notifications.modu
 import { VideosModule } from './services/videos/videos.module';
 import { TrackingModule } from 'src/services/tracking/tracking.module';
 import { AnalyticsModule } from 'src/services/analytics/analytics.module';
+import { PhotosModule } from './services/photos/photos.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AnalyticsModule } from 'src/services/analytics/analytics.module';
     VideosModule,
     TrackingModule,
     AnalyticsModule,
+    PhotosModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

@@ -7,7 +7,6 @@ import {
   Query,
   Body,
   UnauthorizedException,
-  UseGuards,
   Res,
 } from '@nestjs/common';
 import {
@@ -23,7 +22,7 @@ import { CurrentUser } from 'src/security/auth/decorators/currentUser.decorator'
 import { User } from '../../assets/entities/user.entity';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import { Throttle } from '@throttle/throttle';
-import { AdminGuard } from 'src/security/auth/guards/admin.guard';
+// AdminGuard import removed - admin endpoint moved to /v1/admin/users/:id/cooldown/:followingId
 import { Response } from 'express';
 import { RequireScope } from 'src/security/developer/services/scopes/decorators/require-scope.decorator';
 import { Public } from 'src/security/auth/decorators/public.decorator';
@@ -268,28 +267,8 @@ export class FollowsController {
     return this.followsService.getFollowAnalytics(userId);
   }
 
-  @Delete('cooldown/:followerId/:followingId')
-  @UseGuards(AdminGuard)
-  @ApiOperation({ summary: 'Clear follow cooldown (admin only)' })
-  @ApiParam({ name: 'followerId', description: 'Follower User ID' })
-  @ApiParam({ name: 'followingId', description: 'Following User ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Cooldown cleared successfully',
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden (admin only)' })
-  clearCooldown(
-    @CurrentUser() user: User,
-    @Param('followerId') followerId: string,
-    @Param('followingId') followingId: string,
-  ) {
-    const currentUserId = user?.id;
-    if (!currentUserId) {
-      throw new UnauthorizedException('User ID not found');
-    }
-    return this.followsService.clearCooldown(followerId, followingId);
-  }
+  // Admin endpoint moved to: /v1/admin/users/:id/cooldown/:followingId (DELETE)
+  // See: backend/src/security/admin/services/users/users.controller.ts
 
   // #########################################################
   // EXPORT ENDPOINTS

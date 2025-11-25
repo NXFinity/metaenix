@@ -7,6 +7,10 @@ import { Application } from '../../security/developer/assets/entities/applicatio
  */
 export interface AuthenticatedAppSocket extends Socket {
   /**
+   * Socket ID (for compatibility)
+   */
+  id: string;
+  /**
    * Application's websocketId (UUID)
    */
   websocketId?: string;

@@ -2,14 +2,29 @@
 
 import { useParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { userService } from '@/core/api/user';
-import { postsService } from '@/core/api/posts';
-import { Card, CardContent, CardHeader } from '@/theme/ui/card';
+import { userService } from '@/core/api/users/user';
+import { postsService } from '@/core/api/users/posts';
+import { analyticsService } from '@/core/api/data/analytics';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import { Textarea } from '@/theme/ui/textarea';
+import { PostSkeleton } from '@/theme/components/loading/PostSkeleton';
+import { LoadingSpinner } from '@/theme/components/loading/LoadingSpinner';
+import { ErrorState } from '@/theme/components/error/ErrorState';
+import { EmptyState } from '@/theme/components/empty/EmptyState';
+import { PostCard } from '@/theme/components/posts/Posts';
+import { FileTextIcon } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/theme/ui/dialog';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useAuth } from '@/core/hooks/useAuth';
 import {
   HeartIcon,
@@ -23,10 +38,24 @@ import {
   LockIcon,
   MessageSquareIcon,
   TrashIcon,
+  ChevronLeft,
+  ChevronRight,
+  VideoIcon,
+  UploadIcon,
+  SearchIcon,
+  FilterIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  PlusIcon,
+  CheckIcon,
 } from 'lucide-react';
 import { Checkbox } from '@/theme/ui/checkbox';
 import { Label } from '@/theme/ui/label';
-import type { Post, CreatePostRequest } from '@/core/api/posts';
+import { Progress } from '@/theme/ui/progress';
+import { Input } from '@/theme/ui/input';
+import type { Post, CreatePostRequest, Collection } from '@/core/api/users/posts';
+import { videosService } from '@/core/api/users/videos';
+import { useRouter } from 'next/navigation';
 
 // Date formatting helper
 const formatTimeAgo = (date: string) => {
@@ -43,6 +72,13 @@ const formatTimeAgo = (date: string) => {
   return `${Math.floor(diffInSeconds / 31536000)}y ago`;
 };
 
+// Helper function to check if a URL is a video
+const isVideoUrl = (url: string): boolean => {
+  const videoExtensions = ['.mp4', '.webm', '.mov', '.quicktime'];
+  const lowerUrl = url.toLowerCase();
+  return videoExtensions.some((ext) => lowerUrl.includes(ext));
+};
+
 export default function UserPostsPage() {
   const params = useParams();
   const username = params.username as string;
@@ -54,11 +90,23 @@ export default function UserPostsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [filePreviews, setFilePreviews] = useState<string[]>([]);
+  const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [isPublic, setIsPublic] = useState(true);
   const [allowComments, setAllowComments] = useState(true);
   const [isDraft, setIsDraft] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showVideoSelect, setShowVideoSelect] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  
+  // Search and filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'text' | 'image' | 'video' | 'document' | 'mixed' | null>(null);
+  const [selectedPostForCollection, setSelectedPostForCollection] = useState<Post | null>(null);
+  const [isAddToCollectionDialogOpen, setIsAddToCollectionDialogOpen] = useState(false);
 
   // Fetch user data
   const {
@@ -71,17 +119,149 @@ export default function UserPostsPage() {
     enabled: !!username,
   });
 
-  // Fetch posts by user
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const wasSearchActive = debouncedSearchQuery.trim().length > 0;
+      const willBeSearchActive = searchQuery.trim().length > 0;
+      
+      setDebouncedSearchQuery(searchQuery);
+      setPage(1); // Reset to first page when search changes
+      
+      // Clear filter when search becomes active (transitions from empty to non-empty)
+      if (!wasSearchActive && willBeSearchActive && filterType !== null) {
+        setFilterType(null);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, debouncedSearchQuery, filterType]);
+
+  // Reset page when filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [filterType]);
+
+  // Determine which query to use
+  const isSearchActive = debouncedSearchQuery.trim().length > 0;
+  const isFilterActive = filterType !== null;
+  const useSearchOrFilter = isSearchActive || isFilterActive;
+
+  // Fetch posts by user (default)
   const {
     data: postsData,
     isLoading: isLoadingPosts,
     error: postsError,
     isFetching,
   } = useQuery({
-    queryKey: ['posts', 'user', user?.id, page],
-    queryFn: () => postsService.getByUser(user!.id, { page, limit }),
+    queryKey: ['posts', 'user', user?.id, page, isSearchActive ? debouncedSearchQuery : null, isFilterActive ? filterType : null],
+    queryFn: async () => {
+      if (isSearchActive) {
+        return await postsService.search(debouncedSearchQuery, { page, limit });
+      } else if (isFilterActive) {
+        return await postsService.filter(filterType!, { page, limit });
+      } else {
+        return await postsService.getByUser(user!.id, { page, limit });
+      }
+    },
     enabled: !!user?.id,
+    retry: (failureCount, error: unknown) => {
+      // Don't retry on connection errors, 403 (Forbidden) or 404 (Not Found) errors
+      const httpError = error as { code?: string; response?: { status?: number } };
+      if (
+        httpError?.code === 'ERR_CONNECTION_REFUSED' ||
+        httpError?.code === 'ECONNREFUSED' ||
+        httpError?.response?.status === 403 ||
+        httpError?.response?.status === 404
+      ) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
+
+  // Sort posts: pinned posts first, then by date (newest first)
+  // Must be after useQuery but before early returns
+  const posts = useMemo(() => {
+    const allPosts = postsData?.data || [];
+    return [...allPosts].sort((a, b) => {
+      // Pinned posts first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      // Then by date (newest first)
+      return new Date(b.dateCreated).getTime() - new Date(a.dateCreated).getTime();
+    });
+  }, [postsData?.data]);
+  const meta = postsData?.meta;
+
+  // Helper functions - must be before early returns
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setDebouncedSearchQuery('');
+  };
+
+  const handleClearFilter = () => {
+    setFilterType(null);
+  };
+
+  // Check if viewing own profile
+  const isOwnProfile = isAuthenticated && currentUser?.username === username;
+
+  // Fetch collections
+  const {
+    data: collectionsData,
+    isLoading: isLoadingCollections,
+  } = useQuery({
+    queryKey: ['collections', user?.id],
+    queryFn: () => postsService.getCollections({ page: 1, limit: 50 }),
+    enabled: !!user?.id && isOwnProfile,
+  });
+
+  // Add post to collection mutation
+  const addToCollectionMutation = useMutation({
+    mutationFn: ({ collectionId, postId }: { collectionId: string; postId: string }) =>
+      postsService.addToCollection(collectionId, postId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['collectionPosts'] });
+      setIsAddToCollectionDialogOpen(false);
+      setSelectedPostForCollection(null);
+    },
+  });
+
+  // Remove post from collection mutation
+  const removeFromCollectionMutation = useMutation({
+    mutationFn: ({ collectionId, postId }: { collectionId: string; postId: string }) =>
+      postsService.removeFromCollection(collectionId, postId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['collectionPosts'] });
+    },
+  });
+
+  const handleAddToCollection = (collectionId: string) => {
+    if (!selectedPostForCollection) return;
+    addToCollectionMutation.mutate({
+      collectionId,
+      postId: selectedPostForCollection.id,
+    });
+  };
+
+  const handleRemoveFromCollection = (collectionId: string) => {
+    if (!selectedPostForCollection) return;
+    removeFromCollectionMutation.mutate({
+      collectionId,
+      postId: selectedPostForCollection.id,
+    });
+  };
+
+  const postTypes: Array<{ value: 'text' | 'image' | 'video' | 'document' | 'mixed'; label: string }> = [
+    { value: 'text', label: 'Text' },
+    { value: 'image', label: 'Image' },
+    { value: 'video', label: 'Video' },
+    { value: 'document', label: 'Document' },
+    { value: 'mixed', label: 'Mixed' },
+  ];
 
   // Create post mutation (text only)
   const createPostMutation = useMutation({
@@ -96,25 +276,57 @@ export default function UserPostsPage() {
 
   // Create post with files mutation
   const createPostWithFilesMutation = useMutation({
-    mutationFn: (formData: FormData) => postsService.upload(formData),
-    onSuccess: () => {
+    mutationFn: (formData: FormData) => {
+      setIsUploading(true);
+      setUploadProgress(0);
+      return postsService.upload(
+        formData,
+        (progressEvent) => {
+          if (progressEvent.total) {
+            const progress = Math.round(
+              (progressEvent.loaded / progressEvent.total) * 100
+            );
+            setUploadProgress(progress);
+            // If we reach 100%, we're still uploading (processing on server)
+            // Keep showing progress but indicate it's processing
+            if (progress >= 100) {
+              setUploadProgress(100);
+            }
+          }
+        },
+      );
+    },
+    onSuccess: (postResponse) => {
+      // Reset form after successful upload
       resetForm();
       // Invalidate and refetch posts
       queryClient.invalidateQueries({ queryKey: ['posts', 'user', user?.id] });
       queryClient.invalidateQueries({ queryKey: ['posts'] });
+      // Invalidate videos to refresh thumbnails
+      queryClient.invalidateQueries({ queryKey: ['videos', 'user', user?.id] });
+    },
+    onError: () => {
+      setUploadProgress(0);
+      setIsUploading(false);
+    },
+    onSettled: () => {
+      // Reset progress state after mutation completes (success or error)
+      setUploadProgress(0);
+      setIsUploading(false);
     },
   });
-
-  const isOwnProfile = isAuthenticated && currentUser?.username === username;
 
   const resetForm = () => {
     setPostContent('');
     setIsCreating(false);
     setSelectedFiles([]);
     setFilePreviews([]);
+    setSelectedVideoIds([]);
     setIsPublic(true);
     setAllowComments(true);
     setIsDraft(false);
+    setUploadProgress(0);
+    setIsUploading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -124,25 +336,51 @@ export default function UserPostsPage() {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
+    // Filter only image files (videos use VideoUpload component)
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+
+    if (imageFiles.length === 0) return;
+
     // Limit to 10 files
-    const filesToAdd = files.slice(0, 10 - selectedFiles.length);
+    const filesToAdd = imageFiles.slice(0, 10 - selectedFiles.length);
     setSelectedFiles((prev) => [...prev, ...filesToAdd]);
 
-    // Create previews
+    // Create previews for images
     filesToAdd.forEach((file) => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setFilePreviews((prev) => [...prev, reader.result as string]);
-        };
-        reader.readAsDataURL(file);
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFilePreviews((prev) => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
     });
   };
 
   const handleRemoveFile = (index: number) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
     setFilePreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleRemoveVideo = (videoId: string) => {
+    setSelectedVideoIds((prev) => prev.filter((id) => id !== videoId));
+  };
+
+  // Fetch user's videos for selection
+  const {
+    data: userVideosData,
+    isLoading: isLoadingUserVideos,
+  } = useQuery({
+    queryKey: ['videos', 'user', user?.id, 'select'],
+    queryFn: () => videosService.getByUser(user!.id, { page: 1, limit: 100, sortBy: 'dateCreated', sortOrder: 'DESC' }),
+    enabled: !!user?.id && showVideoSelect,
+  });
+
+  const userVideos = userVideosData?.data || [];
+
+  const handleSelectVideo = (videoId: string) => {
+    if (!selectedVideoIds.includes(videoId)) {
+      setSelectedVideoIds((prev) => [...prev, videoId]);
+    }
+    setShowVideoSelect(false);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -165,55 +403,116 @@ export default function UserPostsPage() {
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
 
-    // Filter only image and video files
-    const mediaFiles = files.filter(
-      (file) => file.type.startsWith('image/') || file.type.startsWith('video/')
-    );
+    // Filter only image files (videos use VideoUpload component)
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
 
-    if (mediaFiles.length === 0) return;
+    if (imageFiles.length === 0) return;
 
     // Limit to 10 files
-    const filesToAdd = mediaFiles.slice(0, 10 - selectedFiles.length);
+    const filesToAdd = imageFiles.slice(0, 10 - selectedFiles.length);
     setSelectedFiles((prev) => [...prev, ...filesToAdd]);
 
-    // Create previews
+    // Create previews for images
     filesToAdd.forEach((file) => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setFilePreviews((prev) => [...prev, reader.result as string]);
-        };
-        reader.readAsDataURL(file);
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFilePreviews((prev) => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
     });
   };
 
-  const handleCreatePost = async () => {
-    if (!postContent.trim() || !isOwnProfile) return;
-
-    // If there are files, use the upload endpoint
-    if (selectedFiles.length > 0) {
-      const formData = new FormData();
-      formData.append('content', postContent.trim());
-      formData.append('isPublic', String(isPublic));
-      formData.append('allowComments', String(allowComments));
-      if (isDraft) {
-        formData.append('isDraft', 'true');
+  // Extract URL from content
+  const extractUrlFromContent = (content: string): string | null => {
+    const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
+    const matches = content.match(urlRegex);
+    if (matches && matches.length > 0) {
+      try {
+        // Validate URL and clean it (remove trailing punctuation)
+        let url = matches[0];
+        // Remove common trailing punctuation
+        url = url.replace(/[.,;:!?]+$/, '');
+        new URL(url);
+        return url;
+      } catch {
+        return null;
       }
+    }
+    return null;
+  };
 
-      selectedFiles.forEach((file) => {
-        formData.append('files', file);
-      });
+  const handleCreatePost = async () => {
+    if (!isOwnProfile) return;
 
-      createPostWithFilesMutation.mutate(formData);
+    const content = postContent.trim();
+    const hasContent = content.length > 0;
+    const hasFiles = selectedFiles.length > 0;
+    const hasVideos = selectedVideoIds.length > 0;
+
+    // Require either content, files, or videos
+    if (!hasContent && !hasFiles && !hasVideos) {
+      return;
+    }
+
+    const detectedUrl = extractUrlFromContent(content);
+
+    // If there are files or videos, use the appropriate endpoint
+    if (hasFiles || hasVideos) {
+      if (hasFiles) {
+        // Has images - use upload endpoint
+        const formData = new FormData();
+        if (hasContent) {
+          formData.append('content', content);
+        } else {
+          formData.append('content', '');
+        }
+        formData.append('isPublic', String(isPublic));
+        formData.append('allowComments', String(allowComments));
+        if (isDraft) {
+          formData.append('isDraft', 'true');
+        }
+        if (detectedUrl) {
+          formData.append('linkUrl', detectedUrl);
+        }
+        if (hasVideos) {
+          selectedVideoIds.forEach((videoId) => {
+            formData.append('videoIds', videoId);
+          });
+        }
+
+        selectedFiles.forEach((file) => {
+          formData.append('files', file);
+        });
+
+        createPostWithFilesMutation.mutate(formData);
+      } else {
+        // Only videos, no images - use regular upload endpoint
+        const postData: CreatePostRequest = {
+          content: hasContent ? content : '',
+          isPublic,
+          allowComments,
+          isDraft,
+          videoIds: selectedVideoIds,
+        };
+
+        if (detectedUrl) {
+          postData.linkUrl = detectedUrl;
+        }
+
+        createPostMutation.mutate(postData);
+      }
     } else {
       // Text-only post
       const postData: CreatePostRequest = {
-        content: postContent.trim(),
+        content,
         isPublic,
         allowComments,
         isDraft,
       };
+
+      if (detectedUrl) {
+        postData.linkUrl = detectedUrl;
+      }
 
       createPostMutation.mutate(postData);
     }
@@ -224,15 +523,7 @@ export default function UserPostsPage() {
       <div className="flex flex-1 flex-col max-w-4xl mx-auto w-full p-4 md:p-8">
         <div className="space-y-4">
           {[...Array(3)].map((_, i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader>
-                <div className="h-6 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-4 bg-muted rounded w-1/2" />
-              </CardHeader>
-              <CardContent>
-                <div className="h-32 bg-muted rounded" />
-              </CardContent>
-            </Card>
+            <PostSkeleton key={i} />
           ))}
         </div>
       </div>
@@ -242,22 +533,17 @@ export default function UserPostsPage() {
   if (userError || !user) {
     return (
       <div className="flex flex-1 flex-col max-w-4xl mx-auto w-full p-4 md:p-8">
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-center text-muted-foreground">
-              User not found
-            </p>
-          </CardContent>
-        </Card>
+        <ErrorState
+          title="User not found"
+          message="The user you're looking for doesn't exist or has been removed."
+        />
       </div>
     );
   }
 
-  const posts = postsData?.data || [];
-  const meta = postsData?.meta;
-
   return (
-      <div className="flex flex-1 flex-col max-w-4xl mx-auto w-full p-4 md:p-8">
+    <>
+      <div className="flex flex-1 flex-col max-w-[1600px] mx-auto w-full p-4 md:p-8">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-2">
@@ -268,7 +554,11 @@ export default function UserPostsPage() {
           </p>
         </div>
 
-        {/* Create Post Form - Only show if viewing own profile */}
+        {/* Two Column Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Main Content (2/3 width) */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Create Post Form - Only show if viewing own profile */}
         {isOwnProfile && (
           <Card className="mb-6">
             <CardContent className="pt-6">
@@ -292,7 +582,7 @@ export default function UserPostsPage() {
                   {/* Drag & Drop Info */}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <ImageIcon className="h-3 w-3" />
-                    <span>You can drag and drop images or videos here</span>
+                    <span>You can drag and drop images here</span>
                   </div>
 
                   <div
@@ -303,6 +593,7 @@ export default function UserPostsPage() {
                     }`}
                   >
                     <Textarea
+                      id="post-content"
                       placeholder={
                         isDragging
                           ? 'Drop your media files here...'
@@ -312,7 +603,12 @@ export default function UserPostsPage() {
                       onChange={(e) => setPostContent(e.target.value)}
                       className="min-h-[120px]"
                       maxLength={10000}
+                      aria-label="Post content"
+                      aria-describedby="post-content-help"
                     />
+                    <div id="post-content-help" className="sr-only">
+                      Enter your post content. Maximum 10,000 characters.
+                    </div>
                     {isDragging && (
                       <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-lg pointer-events-none">
                         <div className="text-center">
@@ -325,30 +621,66 @@ export default function UserPostsPage() {
                     )}
                   </div>
 
+                  {/* Upload Progress */}
+                  {(isUploading || createPostWithFilesMutation.isPending) && uploadProgress >= 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          {uploadProgress >= 100 ? 'Processing...' : 'Uploading...'}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {uploadProgress >= 100 ? 'Processing' : `${uploadProgress}%`}
+                        </span>
+                      </div>
+                      <Progress
+                        value={uploadProgress >= 100 ? 100 : uploadProgress}
+                        className="h-2"
+                      />
+                    </div>
+                  )}
+
                   {/* File Previews */}
                   {filePreviews.length > 0 && (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {filePreviews.map((preview, index) => (
-                        <div key={index} className="relative group">
-                          <div className="aspect-square rounded-lg overflow-hidden bg-muted">
-                            <Image
-                              src={preview}
-                              alt={`Preview ${index + 1}`}
-                              width={200}
-                              height={200}
-                              className="w-full h-full object-cover"
-                            />
+                      {filePreviews.map((preview, index) => {
+                        const file = selectedFiles[index];
+                        const isVideo = file?.type.startsWith('video/');
+                        return (
+                          <div key={index} className="relative group">
+                            <div className="aspect-square rounded-lg overflow-hidden bg-muted relative">
+                              <Image
+                                src={preview}
+                                alt={`Preview ${index + 1}`}
+                                width={200}
+                                height={200}
+                                className="w-full h-full object-cover"
+                              />
+                              {isVideo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                  <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center">
+                                    <svg
+                                      className="w-6 h-6 text-black ml-1"
+                                      fill="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => handleRemoveFile(index)}
+                              aria-label={`Remove file ${index + 1}`}
+                            >
+                              <XIcon className="h-3 w-3" aria-hidden="true" />
+                            </Button>
                           </div>
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => handleRemoveFile(index)}
-                          >
-                            <XIcon className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -358,7 +690,7 @@ export default function UserPostsPage() {
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept="image/*,video/*"
+                      accept="image/*"
                       onChange={handleFileSelect}
                       className="hidden"
                       disabled={
@@ -378,9 +710,72 @@ export default function UserPostsPage() {
                       }
                     >
                       <ImageIcon className="h-4 w-4 mr-2" />
-                      Add Media ({selectedFiles.length}/10)
+                      Add Images ({selectedFiles.length}/10)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowVideoSelect(true)}
+                      disabled={
+                        createPostMutation.isPending ||
+                        createPostWithFilesMutation.isPending
+                      }
+                    >
+                      <VideoIcon className="h-4 w-4 mr-2" />
+                      Add Video
                     </Button>
                   </div>
+
+                  {/* Selected Videos */}
+                  {selectedVideoIds.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-muted-foreground">
+                        Selected Videos ({selectedVideoIds.length})
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {selectedVideoIds.map((videoId) => {
+                          const video = userVideos.find((v) => v.id === videoId);
+                          return (
+                            <div
+                              key={videoId}
+                              className="relative group bg-muted rounded-lg overflow-hidden"
+                            >
+                              {video?.thumbnailUrl ? (
+                                <div className="aspect-video relative">
+                                  <Image
+                                    src={video.thumbnailUrl}
+                                    alt={video.title || 'Video thumbnail'}
+                                    fill
+                                    className="object-cover"
+                                    sizes="(max-width: 768px) 50vw, 33vw"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="aspect-video flex items-center justify-center bg-muted">
+                                  <VideoIcon className="h-8 w-8 text-muted-foreground" />
+                                </div>
+                              )}
+                              <div className="p-2">
+                                <p className="text-xs font-medium text-foreground line-clamp-1">
+                                  {video?.title || `Video ${videoId.substring(0, 8)}...`}
+                                </p>
+                              </div>
+                              <Button
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleRemoveVideo(videoId)}
+                                aria-label={`Remove video: ${video?.title || 'Video'}`}
+                              >
+                                <XIcon className="h-3 w-3" aria-hidden="true" />
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Privacy Settings */}
                   <div className="flex flex-wrap items-center gap-4 pt-2 border-t">
@@ -468,17 +863,22 @@ export default function UserPostsPage() {
                       <Button
                         onClick={handleCreatePost}
                         disabled={
-                          !postContent.trim() ||
+                          (!postContent.trim() && selectedFiles.length === 0 && selectedVideoIds.length === 0) ||
                           createPostMutation.isPending ||
-                          createPostWithFilesMutation.isPending
+                          createPostWithFilesMutation.isPending ||
+                          isUploading
                         }
                       >
-                        {(createPostMutation.isPending ||
-                          createPostWithFilesMutation.isPending)
-                          ? 'Posting...'
-                          : isDraft
-                            ? 'Save Draft'
-                            : 'Post'}
+                        {isUploading
+                          ? uploadProgress >= 100
+                            ? 'Processing...'
+                            : `Uploading... ${uploadProgress}%`
+                          : (createPostMutation.isPending ||
+                            createPostWithFilesMutation.isPending)
+                            ? 'Posting...'
+                            : isDraft
+                              ? 'Save Draft'
+                              : 'Post'}
                       </Button>
                     </div>
                   </div>
@@ -487,6 +887,103 @@ export default function UserPostsPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Video Select Dialog */}
+        <Dialog open={showVideoSelect} onOpenChange={setShowVideoSelect}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add Video to Post</DialogTitle>
+              <DialogDescription>
+                Upload a new video or select from your existing videos to add to your post.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {/* Upload New Video Button */}
+              <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                <VideoIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground mb-4">
+                  Upload a new video with compression
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowVideoSelect(false);
+                    router.push(`/${username}/videos/upload`);
+                  }}
+                >
+                  <UploadIcon className="h-4 w-4 mr-2" />
+                  Upload New Video
+                </Button>
+              </div>
+
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">
+                    Or choose from your videos
+                  </span>
+                </div>
+              </div>
+
+              {/* User's Videos List */}
+              {isLoadingUserVideos ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Loading videos...
+                </div>
+              ) : userVideos.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <VideoIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No videos yet. Upload your first video!</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {userVideos
+                    .filter((video) => video.status === 'ready' && video.videoUrl)
+                    .map((video) => (
+                      <div
+                        key={video.id}
+                        className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                          selectedVideoIds.includes(video.id)
+                            ? 'border-primary ring-2 ring-primary/20'
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                        onClick={() => handleSelectVideo(video.id)}
+                      >
+                        {video.thumbnailUrl ? (
+                          <div className="aspect-video relative">
+                            <Image
+                              src={video.thumbnailUrl}
+                              alt={video.title}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 768px) 50vw, 33vw"
+                            />
+                          </div>
+                        ) : (
+                          <div className="aspect-video flex items-center justify-center bg-muted">
+                            <VideoIcon className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="p-2 bg-background">
+                          <p className="text-xs font-medium text-foreground line-clamp-2">
+                            {video.title}
+                          </p>
+                          {selectedVideoIds.includes(video.id) && (
+                            <div className="mt-1 text-xs text-primary font-medium">
+                              ✓ Selected
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Posts List */}
         {postsError ? (
@@ -498,421 +995,433 @@ export default function UserPostsPage() {
             </CardContent>
           </Card>
         ) : posts.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-center py-12">
-                <p className="text-muted-foreground text-lg mb-2">
-                  No posts yet
-                </p>
-                <p className="text-muted-foreground text-sm">
-                  {username === user.username
-                    ? 'Start sharing your thoughts!'
-                    : 'This user hasn\'t posted anything yet.'}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={<MessageSquareIcon className="h-12 w-12 text-muted-foreground" />}
+            title={isSearchActive || isFilterActive ? "No posts found" : "No posts yet"}
+            description={
+              isSearchActive
+                ? `No posts match your search "${debouncedSearchQuery}". Try different keywords.`
+                : isFilterActive
+                ? `No ${postTypes.find(t => t.value === filterType)?.label.toLowerCase()} posts found.`
+                : isOwnProfile
+                ? "Start sharing your thoughts and upload your first post!"
+                : `${user.displayName || user.username} hasn't posted anything yet.`
+            }
+            action={
+              isOwnProfile && !isSearchActive && !isFilterActive
+                ? {
+                    label: 'Create Your First Post',
+                    onClick: () => setIsCreating(true),
+                  }
+                : undefined
+            }
+          />
         ) : (
-          <div className="space-y-4">
-            {posts.map((post) => (
-              <PostCard key={post.id} post={post} />
-            ))}
+          <div className="space-y-6">
+            {/* Results Summary */}
+            {(isSearchActive || isFilterActive) && meta && (
+              <div className="text-sm text-muted-foreground px-2">
+                Found {meta.total} {meta.total === 1 ? 'post' : 'posts'}
+                {isSearchActive && ` matching "${debouncedSearchQuery}"`}
+                {isFilterActive && ` of type ${postTypes.find(t => t.value === filterType)?.label}`}
+              </div>
+            )}
+
+            {/* Posts List */}
+            <div className="space-y-6">
+              {posts.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onAddToCollection={isOwnProfile ? (post) => {
+                    setSelectedPostForCollection(post);
+                    setIsAddToCollectionDialogOpen(true);
+                  } : undefined}
+                />
+              ))}
+            </div>
 
             {/* Pagination */}
             {meta && meta.totalPages > 1 && (
-              <div className="flex items-center justify-center gap-4 mt-8">
+              <div className="flex items-center justify-center gap-4 pt-6 border-t">
                 <Button
                   variant="outline"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page === 1 || isFetching}
+                  className="gap-2"
                 >
+                  <ChevronLeft className="h-4 w-4" />
                   Previous
                 </Button>
-                <span className="text-sm text-muted-foreground">
-                  Page {meta.page} of {meta.totalPages}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    Page
+                  </span>
+                  <span className="text-sm font-semibold text-foreground">
+                    {meta.page}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    of {meta.totalPages}
+                  </span>
+                </div>
                 <Button
                   variant="outline"
                   onClick={() => setPage((p) => Math.min(meta.totalPages, p + 1))}
                   disabled={page === meta.totalPages || isFetching}
+                  className="gap-2"
                 >
                   Next
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             )}
           </div>
         )}
-      </div>
-  );
-}
+          </div>
 
-function PostCard({ post }: { post: Post }) {
-  const { user: currentUser, isAuthenticated } = useAuth();
-  const queryClient = useQueryClient();
-  const author = post.user;
-  const displayName = author?.displayName || author?.username || 'Unknown';
-  const avatar = author?.profile?.avatar;
-  const isOwnPost = currentUser?.id === post.userId;
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+          {/* Right Column - Search and Filter (1/3 width) */}
+          <div className="lg:col-span-1">
+            <div className="sticky top-4">
+              <Card className="border-2">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <SearchIcon className="h-5 w-5 text-primary flex-shrink-0" />
+                    <h2 className="text-lg font-semibold leading-none">Search & Filter</h2>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Search all public posts across the platform, or filter by post type
+                  </p>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="space-y-4">
+                    {/* Search Input */}
+                    <div className="relative">
+                      <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Input
+                        type="text"
+                        placeholder="Search all public posts..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-10 pr-10 h-11 text-base"
+                        aria-label="Search all public posts"
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={handleClearSearch}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label="Clear search"
+                          type="button"
+                        >
+                          <XIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
 
-  // Initialize state from post data
-  const postIsLiked = post.isLiked ?? false;
-  const [isLiked, setIsLiked] = useState(postIsLiked);
-  const [likesCount, setLikesCount] = useState(post.likesCount || 0);
+                    {/* Filter Buttons */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FilterIcon className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground font-medium">Filter by type:</span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {postTypes.map((type) => (
+                          <Button
+                            key={type.value}
+                            variant={filterType === type.value ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setFilterType(filterType === type.value ? null : type.value)}
+                            aria-label={`Filter by ${type.label} posts`}
+                            aria-pressed={filterType === type.value}
+                            disabled={isSearchActive}
+                            className="w-full justify-start"
+                          >
+                            {type.label}
+                          </Button>
+                        ))}
+                      </div>
+                      {filterType && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleClearFilter}
+                          className="w-full"
+                          aria-label="Clear filter"
+                          disabled={isSearchActive}
+                        >
+                          Clear filter
+                        </Button>
+                      )}
+                      {isSearchActive && (
+                        <p className="text-xs text-muted-foreground">
+                          (Filter disabled while searching)
+                        </p>
+                      )}
+                    </div>
 
-  // Sync state with post data when it changes (e.g., after refetch)
-  useEffect(() => {
-    const currentPostIsLiked = post.isLiked ?? false;
-    const currentLikesCount = post.likesCount || 0;
+                    {/* Active Search/Filter Indicator */}
+                    {(isSearchActive || isFilterActive) && (
+                      <div className="space-y-2 pt-2 border-t">
+                        <div className="text-sm text-muted-foreground">
+                          {isSearchActive && (
+                            <div>
+                              <strong className="text-foreground">Searching:</strong> "{debouncedSearchQuery}"
+                            </div>
+                          )}
+                          {isFilterActive && (
+                            <div>
+                              <strong className="text-foreground">Filter:</strong> {postTypes.find(t => t.value === filterType)?.label}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            handleClearSearch();
+                            handleClearFilter();
+                          }}
+                          className="w-full text-xs"
+                        >
+                          Clear all
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-    // Always sync with post data to ensure consistency
-    setIsLiked(currentPostIsLiked);
-    setLikesCount(currentLikesCount);
-  }, [post.id, post.isLiked, post.likesCount]);
-
-  // Like/Unlike mutation
-  const likeMutation = useMutation({
-    mutationFn: async (shouldLike: boolean) => {
-      if (shouldLike) {
-        return await postsService.like(post.id);
-      } else {
-        return await postsService.unlike(post.id);
-      }
-    },
-    onSuccess: (response) => {
-      // Update local state immediately
-      setIsLiked(response.liked);
-      setLikesCount((prev) => (response.liked ? prev + 1 : Math.max(0, prev - 1)));
-
-      // Update the post in cache optimistically for all relevant queries
-      const updatePostInCache = (oldData: any) => {
-        if (!oldData?.data) return oldData;
-        return {
-          ...oldData,
-          data: oldData.data.map((p: any) =>
-            p.id === post.id
-              ? {
-                  ...p,
-                  isLiked: response.liked,
-                  likesCount: response.liked
-                    ? (p.likesCount || 0) + 1
-                    : Math.max(0, (p.likesCount || 0) - 1)
-                }
-              : p
-          ),
-        };
-      };
-
-      // Update single post cache
-      queryClient.setQueryData(['posts', post.id], (oldPost: any) => {
-        if (!oldPost) return oldPost;
-        return {
-          ...oldPost,
-          isLiked: response.liked,
-          likesCount: response.liked
-            ? (oldPost.likesCount || 0) + 1
-            : Math.max(0, (oldPost.likesCount || 0) - 1),
-        };
-      });
-
-      // Update all post queries in cache immediately
-      queryClient.setQueriesData({ queryKey: ['posts', 'user'] }, updatePostInCache);
-      queryClient.setQueriesData({ queryKey: ['posts'] }, updatePostInCache);
-      queryClient.setQueriesData({ queryKey: ['posts', 'feed'] }, updatePostInCache);
-
-      // Invalidate posts queries to refresh data from server (ensures isLiked is correct)
-      queryClient.invalidateQueries({ queryKey: ['posts', post.id] });
-      queryClient.invalidateQueries({ queryKey: ['posts'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'user'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-    },
-    onError: (error: any, shouldLike) => {
-      // Handle "Already liked" error gracefully - treat as success
-      if (error?.response?.status === 400 && error?.response?.data?.message === 'Already liked') {
-        // Post is already liked, sync state
-        setIsLiked(true);
-        // Don't revert count since it's already correct
-        return;
-      }
-
-      // Handle "Like not found" error gracefully - treat as success for unlike
-      if (error?.response?.status === 404 && shouldLike === false) {
-        // Post is already unliked, sync state
-        setIsLiked(false);
-        // Don't revert count since it's already correct
-        return;
-      }
-
-      // Revert optimistic update on other errors
-      setIsLiked(!shouldLike);
-      setLikesCount((prev) => (shouldLike ? Math.max(0, prev - 1) : prev + 1));
-    },
-  });
-
-  const handleLike = () => {
-    if (!isAuthenticated || likeMutation.isPending) return;
-    // Optimistic update
-    const newLikedState = !isLiked;
-    setIsLiked(newLikedState);
-    setLikesCount((prev) => (newLikedState ? prev + 1 : Math.max(0, prev - 1)));
-    likeMutation.mutate(newLikedState);
-  };
-
-  // Share mutation
-  const shareMutation = useMutation({
-    mutationFn: () => postsService.share(post.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['posts', 'user'] });
-      queryClient.invalidateQueries({ queryKey: ['posts'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-    },
-    onError: (error: any) => {
-      console.error('Error sharing post:', error);
-      // You can add a toast notification here if needed
-    },
-  });
-
-  const handleShare = () => {
-    if (!isAuthenticated || shareMutation.isPending) return;
-    shareMutation.mutate();
-  };
-
-  // Delete post mutation
-  const deletePostMutation = useMutation({
-    mutationFn: () => postsService.delete(post.id),
-    onSuccess: () => {
-      // Invalidate all posts queries to refetch
-      queryClient.invalidateQueries({ queryKey: ['posts'] });
-      // Also invalidate user-specific queries
-      if (post.userId) {
-        queryClient.invalidateQueries({ queryKey: ['posts', 'user', post.userId] });
-        queryClient.invalidateQueries({ queryKey: ['posts', 'user', 'public', post.userId] });
-      }
-      setShowDeleteConfirm(false);
-    },
-  });
-
-  const handleDelete = () => {
-    if (showDeleteConfirm) {
-      deletePostMutation.mutate();
-    } else {
-      setShowDeleteConfirm(true);
-    }
-  };
-
-  return (
-    <Card className="hover:shadow-md transition-shadow">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <Link href={`/${author?.username || ''}`}>
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden">
-                {avatar ? (
-                  <Image
-                    src={avatar}
-                    alt={displayName}
-                    width={40}
-                    height={40}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-sm font-bold text-muted-foreground">
-                    {displayName[0].toUpperCase()}
-                  </span>
-                )}
-              </div>
-            </Link>
-            <div>
-              <Link href={`/${author?.username || ''}`}>
-                <p className="font-semibold text-foreground hover:underline">
-                  {displayName}
-                </p>
-              </Link>
-              <p className="text-xs text-muted-foreground">
-                {formatTimeAgo(post.dateCreated)}
-                {post.isEdited && ' · Edited'}
-              </p>
+              {/* Collections Section */}
+              {isOwnProfile && (
+                <Card className="mt-6 border-2">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FolderIcon className="h-5 w-5 text-primary flex-shrink-0" />
+                        <h2 className="text-lg font-semibold leading-none">Collections</h2>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        asChild
+                      >
+                        <Link href={`/${username}/posts/collection`}>
+                          <PlusIcon className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Organize your posts into collections
+                    </p>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    {isLoadingCollections ? (
+                      <div className="flex items-center justify-center py-8">
+                        <LoadingSpinner size="sm" />
+                      </div>
+                    ) : !collectionsData?.data || collectionsData.data.length === 0 ? (
+                      <div className="text-center py-6">
+                        <FolderIcon className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground mb-3">
+                          No collections yet
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <Link href={`/${username}/posts/collection`}>
+                            <FolderPlusIcon className="h-4 w-4 mr-2" />
+                            Create Collection
+                          </Link>
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                        {collectionsData.data.map((collection) => (
+                          <div
+                            key={collection.id}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors group"
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="flex-shrink-0">
+                                {collection.coverImage ? (
+                                  <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted">
+                                    <Image
+                                      src={collection.coverImage}
+                                      alt={collection.name}
+                                      width={40}
+                                      height={40}
+                                      className="w-full h-full object-cover"
+                                      unoptimized
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                                    <FolderIcon className="h-5 w-5 text-primary" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-sm truncate">
+                                    {collection.name}
+                                  </p>
+                                  {collection.isPublic ? (
+                                    <GlobeIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                  ) : (
+                                    <LockIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  {collection.postsCount} post{collection.postsCount !== 1 ? 's' : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              asChild
+                              className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Link href={`/${username}/posts/collection?collection=${collection.id}`}>
+                                <ChevronRight className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full mt-2"
+                          asChild
+                        >
+                          <Link href={`/${username}/posts/collection`}>
+                            <FolderPlusIcon className="h-4 w-4 mr-2" />
+                            View All Collections
+                          </Link>
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {post.isPinned && (
-              <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-                Pinned
-              </span>
-            )}
-            {isOwnPost && (
-              <div className="relative">
-                {showDeleteConfirm ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowDeleteConfirm(false)}
-                      disabled={deletePostMutation.isPending}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={handleDelete}
-                      disabled={deletePostMutation.isPending}
-                    >
-                      {deletePostMutation.isPending ? 'Deleting...' : 'Confirm'}
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={handleDelete}
-                    disabled={deletePostMutation.isPending}
+        </div>
+      </div>
+
+      {/* Add to Collection Dialog */}
+      <Dialog open={isAddToCollectionDialogOpen} onOpenChange={setIsAddToCollectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to Collection</DialogTitle>
+            <DialogDescription>
+              Select a collection to add this post to
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto py-4">
+            {isLoadingCollections ? (
+              <div className="flex items-center justify-center py-8">
+                <LoadingSpinner size="sm" />
+              </div>
+            ) : !collectionsData?.data || collectionsData.data.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-sm text-muted-foreground mb-3">
+                  No collections yet. Create one first.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  asChild
+                >
+                  <Link href={`/${username}/posts/collection`}>
+                    <FolderPlusIcon className="h-4 w-4 mr-2" />
+                    Create Collection
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              collectionsData.data.map((collection) => {
+                // Check if post is already in this collection
+                // Note: We'd need to check post.collections or make an API call
+                const isInCollection = false; // TODO: Check if post is in collection
+                return (
+                  <div
+                    key={collection.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:bg-muted/50 transition-colors"
                   >
-                    <TrashIcon className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                  </Button>
-                )}
-              </div>
+                    <div className="flex items-center gap-3 flex-1">
+                      {collection.coverImage ? (
+                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-muted flex-shrink-0">
+                          <Image
+                            src={collection.coverImage}
+                            alt={collection.name}
+                            width={40}
+                            height={40}
+                            className="w-full h-full object-cover"
+                            unoptimized
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center flex-shrink-0">
+                          <FolderIcon className="h-5 w-5 text-primary" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm truncate">
+                            {collection.name}
+                          </p>
+                          {collection.isPublic ? (
+                            <GlobeIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                          ) : (
+                            <LockIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {collection.postsCount} post{collection.postsCount !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                    {isInCollection ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRemoveFromCollection(collection.id)}
+                        disabled={removeFromCollectionMutation.isPending}
+                      >
+                        <CheckIcon className="h-4 w-4 mr-2" />
+                        Remove
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => handleAddToCollection(collection.id)}
+                        disabled={addToCollectionMutation.isPending}
+                      >
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Post Content */}
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          <p className="whitespace-pre-wrap break-words">{post.content}</p>
-        </div>
-
-        {/* Media */}
-        {post.mediaUrl && (
-          <div className="rounded-lg overflow-hidden">
-            <Image
-              src={post.mediaUrl}
-              alt="Post media"
-              width={800}
-              height={600}
-              className="w-full h-auto object-contain"
-            />
-          </div>
-        )}
-
-        {post.mediaUrls && post.mediaUrls.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
-            {post.mediaUrls.slice(0, 4).map((url, idx) => (
-              <div key={idx} className="rounded-lg overflow-hidden">
-                <Image
-                  src={url}
-                  alt={`Post media ${idx + 1}`}
-                  width={400}
-                  height={300}
-                  className="w-full h-auto object-cover"
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Link Preview */}
-        {post.linkUrl && (
-          <Link
-            href={post.linkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block border rounded-lg p-4 hover:bg-muted/50 transition-colors"
-          >
-            {post.linkImage && (
-              <div className="mb-3 rounded overflow-hidden">
-                <Image
-                  src={post.linkImage}
-                  alt={post.linkTitle || 'Link preview'}
-                  width={600}
-                  height={315}
-                  className="w-full h-auto object-cover"
-                />
-              </div>
-            )}
-            {post.linkTitle && (
-              <p className="font-semibold text-foreground mb-1">
-                {post.linkTitle}
-              </p>
-            )}
-            {post.linkDescription && (
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {post.linkDescription}
-              </p>
-            )}
-            <p className="text-xs text-muted-foreground mt-2">
-              {new URL(post.linkUrl).hostname}
-            </p>
-          </Link>
-        )}
-
-        {/* Hashtags */}
-        {post.hashtags && post.hashtags.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {post.hashtags.map((tag, idx) => (
-              <Link
-                key={idx}
-                href={`/search?q=${encodeURIComponent(tag)}`}
-                className="text-sm text-primary hover:underline"
-              >
-                #{tag}
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {/* Interactions */}
-        <div className="flex items-center gap-6 pt-2 border-t">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleLike}
-            disabled={!isAuthenticated || likeMutation.isPending}
-            className={`gap-2 transition-colors ${
-              isLiked
-                ? 'text-red-500 bg-red-500/10 hover:text-red-600 hover:bg-red-500/20'
-                : 'text-muted-foreground hover:text-red-500 hover:bg-red-500/10'
-            }`}
-          >
-            <HeartIcon className={`h-4 w-4 ${isLiked ? 'fill-current' : ''}`} />
-            <span>{likesCount}</span>
-          </Button>
-          <Link href={`/${post.user?.username || ''}/posts/${post.id}`}>
+          <DialogFooter>
             <Button
-              variant="ghost"
-              size="sm"
-              className="gap-2 text-muted-foreground hover:text-foreground"
+              variant="outline"
+              onClick={() => setIsAddToCollectionDialogOpen(false)}
+              disabled={addToCollectionMutation.isPending || removeFromCollectionMutation.isPending}
             >
-              <MessageCircleIcon className="h-4 w-4" />
-              <span>{post.commentsCount}</span>
+              Cancel
             </Button>
-          </Link>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleShare}
-            disabled={!isAuthenticated || shareMutation.isPending}
-            className="gap-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-          >
-            <ShareIcon className="h-4 w-4" />
-            <span>{post.sharesCount || 0}</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <BookmarkIcon className="h-4 w-4" />
-            <span>{post.bookmarksCount}</span>
-          </Button>
-          <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-            <EyeIcon className="h-3 w-3" />
-            <span>{post.viewsCount}</span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
+
+// PostCard component removed - using PostCard from @/theme/components/posts/Posts instead
 

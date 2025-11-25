@@ -10,6 +10,8 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../../rest/api/users/users.module';
 import { EmailModule } from '@email/email';
 import { TwofaModule } from '../../rest/api/users/security/twofa/twofa.module';
+import { RedisModule } from '@redis/redis';
+import { LoggingModule } from '@logging/logging';
 
 // Strategies
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -18,6 +20,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     UsersModule,
     TwofaModule, // Import TwofaModule for 2FA integration
+    RedisModule, // Import RedisModule for token version checking
+    LoggingModule, // Import LoggingModule for audit logging
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

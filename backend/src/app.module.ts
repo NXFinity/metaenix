@@ -41,6 +41,8 @@ import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 // Interceptors
 import { LoggingInterceptor } from './common/monitoring/interceptors/logging.interceptor';
 import { PerformanceInterceptor } from './common/monitoring/interceptors/performance.interceptor';
+import { AdminModule } from './security/admin/admin.module';
+import { ReportingModule } from './services/reporting/reporting.module';
 
 // Configuration Variables
 
@@ -200,6 +202,8 @@ import { PerformanceInterceptor } from './common/monitoring/interceptors/perform
     SharesModule,
     LoggingModule,
     MonitoringModule,
+    AdminModule,
+    ReportingModule,
   ],
   controllers: [],
   providers: [

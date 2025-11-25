@@ -83,8 +83,9 @@ async function bootstrap() {
     req.requestId = requestIdString;
     req.correlationId = requestIdString;
 
-    // Include request ID in response headers
+    // Include request ID and correlation ID in response headers
     res.setHeader('X-Request-Id', requestIdString);
+    res.setHeader('X-Correlation-Id', requestIdString);
 
     next();
   });

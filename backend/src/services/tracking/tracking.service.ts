@@ -335,4 +335,16 @@ export class TrackingService {
   ): Promise<{ tracked: boolean; reason?: string }> {
     return this.trackView(ResourceType.VIDEO, videoId, userId, req, viewerUserId);
   }
+
+  /**
+   * Track photo view (convenience method)
+   */
+  async trackPhotoView(
+    photoId: string,
+    userId: string,
+    req: any,
+    viewerUserId?: string,
+  ): Promise<{ tracked: boolean; reason?: string }> {
+    return this.trackView(ResourceType.PHOTO, photoId, userId, req, viewerUserId);
+  }
 }

@@ -1,6 +1,6 @@
 import {
   WebSocketGateway,
-  WebSocketServer,
+  WebSocketServer as WsServerDecorator,
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -16,19 +16,24 @@ import { AuthenticatedAppSocket } from '../../../../common/interfaces/authentica
 import { LoggingService } from '@logging/logging';
 import { LogCategory } from '@logging/logging';
 import { ApplicationStatus } from '../../assets/enum/application-status.enum';
+import { getCorsOriginFunction } from '../../../../config/cors.config';
+
+const corsOriginFunction = getCorsOriginFunction(process.env.NODE_ENV || 'development');
 
 @WebSocketGateway({
   namespace: 'developer',
   cors: {
-    origin: '*',
+    origin: corsOriginFunction,
     credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   },
 })
 @Injectable()
 export class DeveloperWebsocketGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
-  @WebSocketServer()
+  @WsServerDecorator()
   server!: Server;
 
   private readonly logger = new Logger(DeveloperWebsocketGateway.name);
@@ -46,17 +51,19 @@ export class DeveloperWebsocketGateway
    */
   async handleConnection(@ConnectedSocket() client: AuthenticatedAppSocket) {
     try {
-      // Extract websocketId from handshake
-      const websocketId = this.extractWebsocketId(client);
+      // Socket.IO automatically assigns an ID, no need to generate one
+      // Extract websocketId from Socket.IO handshake query
+      const websocketId = client.handshake.query.websocketId as string;
 
       if (!websocketId) {
         this.logger.warn(
           `Connection rejected: No websocketId provided - Socket: ${client.id}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: websocketId required',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -66,9 +73,10 @@ export class DeveloperWebsocketGateway
           `Connection rejected: Invalid websocketId format - Socket: ${client.id}, websocketId: ${websocketId}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: Invalid websocketId format',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -80,9 +88,10 @@ export class DeveloperWebsocketGateway
           `Connection rejected: Application not found - Socket: ${client.id}, websocketId: ${websocketId}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: Invalid websocketId',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -92,9 +101,10 @@ export class DeveloperWebsocketGateway
           `Connection rejected: Application not active - Socket: ${client.id}, appId: ${application.id}, status: ${application.status}`,
         );
         client.emit('error', {
+          type: 'error',
           message: `Application is not active. Status: ${application.status}`,
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -106,9 +116,10 @@ export class DeveloperWebsocketGateway
           `Disconnecting previous connection for websocketId: ${websocketId}`,
         );
         existingSocket.emit('error', {
+          type: 'error',
           message: 'New connection established from another location',
         });
-        existingSocket.disconnect();
+        existingSocket.disconnect(true);
       }
 
       // Store connection
@@ -126,6 +137,7 @@ export class DeveloperWebsocketGateway
 
       // Send success message to client
       client.emit('connected', {
+        type: 'connected',
         message: 'Connected to developer gateway',
         websocketId,
         applicationId: application.id,
@@ -144,9 +156,10 @@ export class DeveloperWebsocketGateway
         },
       );
       client.emit('error', {
+        type: 'error',
         message: 'Connection failed: Internal server error',
       });
-      client.disconnect();
+      client.disconnect(true);
     }
   }
 
@@ -172,14 +185,14 @@ export class DeveloperWebsocketGateway
     @MessageBody() data: { event?: string; events?: string[] },
   ) {
     if (!client.application) {
-      client.emit('error', { message: 'Not authenticated' });
+      client.emit('error', { type: 'error', message: 'Not authenticated' });
       return;
     }
 
     const eventsToSubscribe = data.events || (data.event ? [data.event] : []);
 
     if (eventsToSubscribe.length === 0) {
-      client.emit('error', { message: 'No events specified' });
+      client.emit('error', { type: 'error', message: 'No events specified' });
       return;
     }
 
@@ -218,6 +231,7 @@ export class DeveloperWebsocketGateway
     }
 
     client.emit('subscribed', {
+      type: 'subscribed',
       subscribed,
       rejected: rejected.length > 0 ? rejected : undefined,
     });
@@ -236,14 +250,14 @@ export class DeveloperWebsocketGateway
     @MessageBody() data: { event?: string; events?: string[] },
   ) {
     if (!client.application) {
-      client.emit('error', { message: 'Not authenticated' });
+      client.emit('error', { type: 'error', message: 'Not authenticated' });
       return;
     }
 
     const eventsToUnsubscribe = data.events || (data.event ? [data.event] : []);
 
     if (eventsToUnsubscribe.length === 0) {
-      client.emit('error', { message: 'No events specified' });
+      client.emit('error', { type: 'error', message: 'No events specified' });
       return;
     }
 
@@ -256,7 +270,7 @@ export class DeveloperWebsocketGateway
       }
     }
 
-    client.emit('unsubscribed', { unsubscribed });
+    client.emit('unsubscribed', { type: 'unsubscribed', unsubscribed });
 
     this.logger.debug(
       `App ${client.application.id} unsubscribed from events: ${unsubscribed.join(', ')}`,
@@ -269,11 +283,12 @@ export class DeveloperWebsocketGateway
   @SubscribeMessage('list_subscriptions')
   async handleListSubscriptions(@ConnectedSocket() client: AuthenticatedAppSocket) {
     if (!client.application) {
-      client.emit('error', { message: 'Not authenticated' });
+      client.emit('error', { type: 'error', message: 'Not authenticated' });
       return;
     }
 
     client.emit('subscriptions', {
+      type: 'subscriptions',
       events: Array.from(client.subscribedEvents || []),
       scopes: client.application.scopes || [],
     });
@@ -410,11 +425,12 @@ export class DeveloperWebsocketGateway
   private broadcastToSubscribedApps(eventName: string, payload: any) {
     let count = 0;
     for (const [_websocketId, socket] of this.connectedApps.entries()) {
-      if (socket.subscribedEvents?.has(eventName)) {
-        socket.emit('event', {
-          type: eventName,
+      if (socket.subscribedEvents?.has(eventName) && socket.connected) {
+        socket.send(JSON.stringify({
+          type: 'event',
+          event: eventName,
           data: payload,
-        });
+        }));
         count++;
       }
     }
@@ -425,17 +441,6 @@ export class DeveloperWebsocketGateway
     }
   }
 
-  /**
-   * Extract websocketId from handshake
-   */
-  private extractWebsocketId(client: AuthenticatedAppSocket): string | null {
-    return (
-      (client.handshake.query.websocketId as string) ||
-      (client.handshake.headers['x-websocket-id'] as string) ||
-      (client.handshake.auth?.websocketId as string) ||
-      null
-    );
-  }
 
   /**
    * Validate UUID format

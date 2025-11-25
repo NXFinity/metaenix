@@ -21,6 +21,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../../rest/api/users/services/posts/assets/entities/post.entity';
 import { Video } from '../../rest/api/users/services/videos/assets/entities/video.entity';
+import { Photo } from '../../rest/api/users/services/photos/assets/entities/photo.entity';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { LoggingService } from '@logging/logging';
 
@@ -33,6 +34,8 @@ export class TrackingController {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(Video)
     private readonly videoRepository: Repository<Video>,
+    @InjectRepository(Photo)
+    private readonly photoRepository: Repository<Photo>,
     private readonly analyticsService: AnalyticsService,
     private readonly loggingService: LoggingService,
   ) {}
@@ -206,6 +209,68 @@ export class TrackingController {
   }
 
   /**
+   * Track a photo view
+   */
+  @PostDecorator('photos/:photoId/view')
+  @Public()
+  @ApiOperation({
+    summary: 'Track photo view',
+    description: 'Tracks a view of a photo with geographic data. Public endpoint.',
+  })
+  @ApiParam({
+    name: 'photoId',
+    description: 'Photo ID being viewed',
+    type: 'string',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Photo view tracked successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Photo not found',
+  })
+  async trackPhotoView(
+    @Param('photoId') photoId: string,
+    @Req() req: AuthenticatedRequest,
+    @CurrentUser() user?: User,
+  ) {
+    const viewerUserId = user?.id;
+    const photo = await this.photoRepository.findOne({
+      where: { id: photoId },
+      select: ['id', 'userId'],
+    });
+
+    if (!photo) {
+      throw new NotFoundException('Photo not found');
+    }
+
+    const result = await this.trackingService.trackPhotoView(
+      photoId,
+      photo.userId,
+      req,
+      viewerUserId,
+    );
+
+    // Only recalculate analytics if view was actually tracked (not a duplicate)
+    if (result.tracked) {
+      this.analyticsService.calculatePhotoAnalytics(photoId).catch((error: unknown) => {
+        this.loggingService.error(
+          'Error recalculating photo analytics after view',
+          error instanceof Error ? error.stack : undefined,
+          'TrackingController',
+        );
+      });
+    }
+
+    return { success: result.tracked, tracked: result.tracked, reason: result.reason };
+  }
+
+  /**
    * Track a view for any resource type
    */
   @PostDecorator('resources/:resourceType/:resourceId/view')
@@ -265,6 +330,15 @@ export class TrackingController {
         throw new NotFoundException('Video not found');
       }
       ownerUserId = video.userId;
+    } else if (resourceType === ResourceType.PHOTO) {
+      const photo = await this.photoRepository.findOne({
+        where: { id: resourceId },
+        select: ['id', 'userId'],
+      });
+      if (!photo) {
+        throw new NotFoundException('Photo not found');
+      }
+      ownerUserId = photo.userId;
     } else {
       throw new NotFoundException('Unknown resource type');
     }

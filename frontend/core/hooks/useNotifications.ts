@@ -3,15 +3,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './useAuth';
-import { notificationsService } from '@/core/api/notifications';
+import { notificationsService } from '@/core/api/users/notifications';
 import type {
   Notification,
   GetNotificationsParams,
-} from '@/core/api/notifications';
+} from '@/core/api/users/notifications';
+import { connectUserSocket } from '@/lib/websocket/client';
+import type { Socket } from 'socket.io-client';
 
 /**
  * Hook for managing notifications
- * 
+ *
  * Provides:
  * - Notifications list with pagination
  * - Unread count
@@ -36,14 +38,14 @@ export const useNotifications = (
     shouldEnableQueriesRef.current = shouldEnableQueries;
   }, [shouldEnableQueries]);
 
-  // Aggressively cancel ALL notification queries if disabled - run on every render
+  // Aggressively cancel ALL notification queries if disabled
   useEffect(() => {
     if (!shouldEnableQueries) {
       // Cancel ALL notification-related queries immediately
       queryClient.cancelQueries({ queryKey: ['notifications'] });
       queryClient.removeQueries({ queryKey: ['notifications'] });
     }
-  });
+  }, [shouldEnableQueries, queryClient]);
 
   // Query: Get notifications - only execute when explicitly enabled and all conditions pass
   const {
@@ -100,6 +102,35 @@ export const useNotifications = (
       setUnreadCount(unreadCountData);
     }
   }, [unreadCountData]);
+
+  // Listen for real-time notification events via WebSocket
+  useEffect(() => {
+    if (!isAuthenticated || !user?.websocketId || !enabled) {
+      return;
+    }
+
+    const socket = connectUserSocket(user.websocketId);
+    
+    const handleNewNotification = (data: { type?: string; notification: Notification }) => {
+      // Only increment if notification is unread
+      if (data.notification && !data.notification.isRead) {
+        // Optimistically increment the unread count
+        queryClient.setQueryData<number>(['notifications', 'unread-count'], (oldCount) => {
+          return (oldCount ?? 0) + 1;
+        });
+      }
+      
+      // Invalidate queries to refetch notifications and unread count
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      refetchUnreadCount();
+    };
+
+    socket.on('new_notification', handleNewNotification);
+
+    return () => {
+      socket.off('new_notification', handleNewNotification);
+    };
+  }, [isAuthenticated, user?.websocketId, enabled, queryClient, refetchUnreadCount]);
 
   // Mutation: Mark notification as read
   const markAsReadMutation = useMutation({
@@ -167,7 +198,8 @@ export const useNotifications = (
  * Lighter weight hook for components that only need the count
  */
 export const useUnreadCount = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const queryClient = useQueryClient();
 
   const { data, refetch } = useQuery({
     queryKey: ['notifications', 'unread-count'],
@@ -176,6 +208,35 @@ export const useUnreadCount = () => {
     staleTime: 10 * 1000, // 10 seconds
     refetchInterval: 30 * 1000, // Refetch every 30 seconds to get updated count
   });
+
+  // Listen for real-time notification events via WebSocket
+  useEffect(() => {
+    if (!isAuthenticated || !user?.websocketId) {
+      return;
+    }
+
+    const socket = connectUserSocket(user.websocketId);
+    
+    const handleNewNotification = (data: { type?: string; notification?: Notification }) => {
+      // Only increment if notification exists and is unread
+      if (data.notification && !data.notification.isRead) {
+        // Optimistically increment the unread count immediately
+        queryClient.setQueryData<number>(['notifications', 'unread-count'], (oldCount) => {
+          return (oldCount ?? 0) + 1;
+        });
+      }
+      
+      // Also invalidate and refetch to get the accurate count from the server
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] });
+      refetch();
+    };
+
+    socket.on('new_notification', handleNewNotification);
+
+    return () => {
+      socket.off('new_notification', handleNewNotification);
+    };
+  }, [isAuthenticated, user?.websocketId, queryClient, refetch]);
 
   return {
     unreadCount: data ?? 0,

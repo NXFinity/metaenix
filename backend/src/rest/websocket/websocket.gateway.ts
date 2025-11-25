@@ -1,13 +1,13 @@
 import {
   WebSocketGateway,
-  WebSocketServer,
+  WebSocketServer as WsServerDecorator,
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
   // MessageBody, // Reserved for future use
   SubscribeMessage,
 } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { Namespace } from 'socket.io';
 import {
   Injectable,
   Logger,
@@ -27,20 +27,28 @@ import {
   WEBSOCKET_MAX_RETRIES,
   SESSION_COOKIE_NAME,
 } from '../../common/constants/app.constants';
+import { getCorsOriginFunction } from '../../config/cors.config';
+import { OnEvent } from '@nestjs/event-emitter';
+
+const corsOriginFunction = getCorsOriginFunction(process.env.NODE_ENV || 'development');
 
 @WebSocketGateway({
   namespace: 'account',
   cors: {
-    origin: '*',
+    origin: corsOriginFunction,
     credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   },
 })
 @Injectable()
 export class WebsocketGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
 {
-  @WebSocketServer()
-  server!: Server;
+  @WsServerDecorator()
+  server!: Namespace;
+  
+  private connectedClients = new Map<string, AuthenticatedSocket>();
 
   private readonly logger = new Logger(WebsocketGateway.name);
   private sessionStore: session.Store | null = null;
@@ -92,7 +100,9 @@ export class WebsocketGateway
    */
   async handleConnection(@ConnectedSocket() client: AuthenticatedSocket) {
     try {
-      // Extract websocketId from handshake
+      // Socket.IO automatically assigns an ID, no need to generate one
+      
+      // Extract websocketId from URL query or headers
       const websocketId = await this.extractWebsocketId(client);
 
       if (!websocketId) {
@@ -100,9 +110,10 @@ export class WebsocketGateway
           `Connection rejected: No websocketId provided - Socket: ${client.id}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: websocketId required',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -112,9 +123,10 @@ export class WebsocketGateway
           `Connection rejected: Invalid websocketId format - Socket: ${client.id}, websocketId: ${websocketId}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: Invalid websocketId format',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -126,9 +138,10 @@ export class WebsocketGateway
           `Connection rejected: User not found - Socket: ${client.id}, websocketId: ${websocketId}`,
         );
         client.emit('error', {
+          type: 'error',
           message: 'Authentication failed: Invalid websocketId',
         });
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
@@ -140,12 +153,13 @@ export class WebsocketGateway
         this.logger.debug(
           `Disconnecting previous connection for websocketId: ${websocketId}`,
         );
-        const existingSocket = this.server.sockets.sockets.get(existingSocketId);
+        const existingSocket = this.connectedClients.get(existingSocketId);
         if (existingSocket) {
           existingSocket.emit('error', {
+            type: 'error',
             message: 'New connection established from another location',
           });
-          existingSocket.disconnect();
+          existingSocket.disconnect(true);
         }
       }
 
@@ -156,10 +170,16 @@ export class WebsocketGateway
         user.id,
       );
 
+      // Store client in map
+      this.connectedClients.set(client.id, client);
+
       // Attach user data to socket
       client.websocketId = websocketId;
       client.userId = user.id;
       client.user = user;
+      
+      // Join user-specific room for targeted messaging
+      client.join(`user:${user.id}`);
 
       this.logger.log(
         `WebSocket connected: websocketId=${websocketId}, userId=${user.id}, socketId=${client.id}`,
@@ -167,6 +187,7 @@ export class WebsocketGateway
 
       // Send success message to client
       client.emit('connected', {
+        type: 'connected',
         message: 'Connected to account gateway',
         websocketId,
         userId: user.id,
@@ -184,9 +205,10 @@ export class WebsocketGateway
         },
       );
       client.emit('error', {
+        type: 'error',
         message: 'Connection failed: Internal server error',
       });
-      client.disconnect();
+      client.disconnect(true);
     }
   }
 
@@ -195,11 +217,14 @@ export class WebsocketGateway
    */
   async handleDisconnect(@ConnectedSocket() client: AuthenticatedSocket) {
     try {
+      // Remove from connected clients map
+      this.connectedClients.delete(client.id);
+      
       const websocketId = client.websocketId;
       const userId = client.userId;
 
       if (websocketId && userId) {
-        await this.websocketService.removeConnection(websocketId, userId);
+        await this.websocketService.removeConnection(websocketId, userId, client.id);
         this.logger.log(
           `WebSocket disconnected: websocketId=${websocketId}, socketId=${client.id}`,
         );
@@ -229,29 +254,39 @@ export class WebsocketGateway
   handlePing(@ConnectedSocket() client: AuthenticatedSocket) {
     const websocketId = client.websocketId;
     if (!websocketId) {
-      client.emit('error', { message: 'Not authenticated' });
+      client.emit('error', {
+        type: 'error',
+        message: 'Not authenticated',
+      });
       return;
     }
 
     client.emit('pong', {
+      type: 'pong',
       timestamp: new Date().toISOString(),
       websocketId,
     });
   }
 
   /**
-   * Extract websocketId from handshake
+   * Extract websocketId from URL query or headers
    * Priority: 1. Query parameter, 2. Session cookie
    */
   private async extractWebsocketId(client: AuthenticatedSocket): Promise<string | null> {
-    // Try query parameter first
+    // With Socket.IO, query parameters are available in client.handshake.query
+    try {
     const queryWebsocketId = client.handshake.query.websocketId as string;
     if (queryWebsocketId) {
       return queryWebsocketId;
+      }
+    } catch (error) {
+      // Query extraction failed, continue to cookie check
+      this.logger.debug(`Error extracting websocketId from query: ${error}`);
     }
 
     // Try to get from session cookie
     try {
+      // Get cookies from Socket.IO handshake headers
       const cookies = client.handshake.headers.cookie;
       if (!cookies) {
         return null;
@@ -314,5 +349,44 @@ export class WebsocketGateway
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     return uuidRegex.test(uuid);
+  }
+
+  /**
+   * Listen for notification.created events and emit them via WebSocket
+   */
+  @OnEvent('notification.created')
+  async handleNotificationCreated(payload: { userId: string; notification: any }) {
+    try {
+      const { userId, notification } = payload;
+      
+      // Emit notification to user's room
+      this.server.to(`user:${userId}`).emit('new_notification', {
+        type: 'new_notification',
+        notification: {
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          isRead: notification.isRead,
+          dateCreated: notification.dateCreated,
+          actionUrl: notification.actionUrl,
+        },
+      });
+
+      this.logger.debug(
+        `Notification event emitted to user:${userId}, notificationId=${notification.id}`,
+      );
+    } catch (error) {
+      this.loggingService.error(
+        'Error emitting notification via WebSocket',
+        error instanceof Error ? error.stack : undefined,
+        'WebsocketGateway',
+        {
+          category: LogCategory.USER_MANAGEMENT,
+          error: error instanceof Error ? error : new Error(String(error)),
+          metadata: { payload },
+        },
+      );
+    }
   }
 }

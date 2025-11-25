@@ -40,6 +40,43 @@ export class VideosService {
   ) {}
 
   /**
+   * Generate a URL-friendly slug from a title
+   */
+  private generateSlug(title: string): string {
+    return title
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '') // Remove special characters
+      .replace(/[\s_-]+/g, '-') // Replace spaces, underscores, and multiple hyphens with single hyphen
+      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+  }
+
+  /**
+   * Generate a unique slug for a video
+   */
+  private async generateUniqueSlug(title: string, excludeId?: string): Promise<string> {
+    const baseSlug = this.generateSlug(title).substring(0, 200); // Limit length
+    let slug = baseSlug;
+    let counter = 1;
+
+    while (true) {
+      const existing = await this.videoRepository.findOne({
+        where: { slug },
+        select: ['id'],
+      });
+
+      // If no existing video with this slug, or it's the same video we're updating
+      if (!existing || (excludeId && existing.id === excludeId)) {
+        return slug;
+      }
+
+      // Append counter to make it unique
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    }
+  }
+
+  /**
    * Create a video record (after file upload)
    */
   async createVideo(
@@ -66,12 +103,16 @@ export class VideosService {
         'video',
       );
 
+      // Generate unique slug
+      const slug = await this.generateUniqueSlug(createDto.title);
+
       // Create video entity
       // If video is successfully uploaded and has a URL, mark as ready
       // Processing status is only needed if there's additional processing (thumbnails, transcoding, etc.)
       const video = this.videoRepository.create({
         userId,
         title: createDto.title,
+        slug,
         description: createDto.description || null,
         videoUrl: uploadResult.url,
         storageKey: uploadResult.key,
@@ -189,23 +230,27 @@ export class VideosService {
   }
 
   /**
-   * Get a single video by ID
+   * Get a single video by ID (UUID only - slugs are frontend-only)
    */
   async getVideoById(
     videoId: string,
     requestingUserId?: string,
   ): Promise<Video> {
     try {
-      const video = await this.videoRepository.findOne({
-        where: {
-          id: videoId,
-          dateDeleted: IsNull(),
-        },
+      // Backend only accepts UUIDs - slugs are frontend-only for URL aesthetics
+      let video = await this.videoRepository.findOne({
+        where: { id: videoId, dateDeleted: IsNull() },
         relations: ['user', 'user.profile'],
       });
 
       if (!video) {
         throw new NotFoundException('Video not found');
+      }
+
+      // If video doesn't have a slug, generate one (for existing videos)
+      if (!video.slug) {
+        video.slug = await this.generateUniqueSlug(video.title, video.id);
+        await this.videoRepository.save(video);
       }
 
       // Check if user has access (public or owner)
@@ -256,6 +301,13 @@ export class VideosService {
       // Update fields
       if (updateDto.title !== undefined) {
         video.title = updateDto.title;
+        // Regenerate slug if title changed (or if slug is missing)
+        if (!video.slug || video.title !== updateDto.title) {
+          video.slug = await this.generateUniqueSlug(updateDto.title, videoId);
+        }
+      } else if (!video.slug) {
+        // If title didn't change but slug is missing, generate it
+        video.slug = await this.generateUniqueSlug(video.title, videoId);
       }
       if (updateDto.description !== undefined) {
         video.description = updateDto.description;

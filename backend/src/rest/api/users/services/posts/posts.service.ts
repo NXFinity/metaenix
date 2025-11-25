@@ -33,6 +33,7 @@ import {
 } from 'src/common/interfaces/pagination-response.interface';
 import { VideosService } from '../videos/videos.service';
 import { Video } from '../videos/assets/entities/video.entity';
+import { PhotosService } from '../photos/photos.service';
 import { TrackingService } from 'src/services/tracking/tracking.service';
 import { AnalyticsService } from 'src/services/analytics/analytics.service';
 import { HttpService } from '@nestjs/axios';
@@ -65,6 +66,7 @@ export class PostsService {
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
     private readonly videosService: VideosService,
+    private readonly photosService: PhotosService,
     private readonly trackingService: TrackingService,
     private readonly analyticsService: AnalyticsService,
     private readonly httpService: HttpService,
@@ -527,6 +529,7 @@ export class PostsService {
         // Upload media files (images, videos, GIFs)
         if (files && files.length > 0) {
           const videoMimeTypes = ['video/mp4', 'video/webm', 'video/quicktime'];
+          const imageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
           for (const file of files) {
             const uploadResult = await this.storageService.uploadFile(
@@ -564,6 +567,36 @@ export class PostsService {
                         ? videoError
                         : new Error(String(videoError)),
                     metadata: { videoUrl: uploadResult.url },
+                  },
+                );
+              }
+            }
+
+            // If this is an image file, also add it to user's photo library
+            if (imageMimeTypes.includes(file.mimetype)) {
+              try {
+                await this.photosService.createPhotoFromUploadedFile(
+                  userId,
+                  uploadResult.url,
+                  uploadResult.key,
+                  uploadResult.mimeType,
+                  uploadResult.size,
+                  `Photo from post - ${new Date().toLocaleDateString()}`,
+                );
+              } catch (photoError) {
+                // Log but don't fail post creation if photo library creation fails
+                this.loggingService.error(
+                  'Failed to add photo to user library',
+                  photoError instanceof Error ? photoError.stack : undefined,
+                  'PostsService',
+                  {
+                    category: LogCategory.DATABASE,
+                    userId,
+                    error:
+                      photoError instanceof Error
+                        ? photoError
+                        : new Error(String(photoError)),
+                    metadata: { imageUrl: uploadResult.url },
                   },
                 );
               }
@@ -678,7 +711,7 @@ export class PostsService {
     postId: string,
     userId?: string,
   ): Promise<
-    Post & { isLiked: boolean; isShared: boolean } & Record<string, any>
+    Post & { isLiked: boolean; isShared: boolean; isBookmarked: boolean } & Record<string, any>
   > {
     try {
       const post = await this.cachingService.getOrSet(
@@ -714,9 +747,10 @@ export class PostsService {
         throw new NotFoundException('Post not found');
       }
 
-      // Check if user has liked/shared this post
+      // Check if user has liked/shared/bookmarked this post
       let isLiked = false;
       let isShared = false;
+      let isBookmarked = false;
 
       if (userId) {
         const like = await this.likeRepository.findOne({
@@ -728,6 +762,11 @@ export class PostsService {
           where: { userId, resourceType: 'post', resourceId: postId },
         });
         isShared = !!share;
+
+        const bookmark = await this.bookmarkRepository.findOne({
+          where: { userId, postId },
+        });
+        isBookmarked = !!bookmark;
       }
 
       // Note: View tracking is handled by trackPostView() called above
@@ -737,7 +776,8 @@ export class PostsService {
         ...post,
         isLiked,
         isShared,
-      } as Post & { isLiked: boolean; isShared: boolean } & Record<string, any>;
+        isBookmarked,
+      } as Post & { isLiked: boolean; isShared: boolean; isBookmarked: boolean } & Record<string, any>;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -817,10 +857,27 @@ export class PostsService {
         );
       }
 
-      // Check which posts are liked by the user
+      // Batch fetch all bookmarks for the user if authenticated
+      let userBookmarks: Set<string> = new Set();
+      if (userId && posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const bookmarks = await this.bookmarkRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userBookmarks = new Set(
+          bookmarks.map((bookmark) => bookmark.postId).filter((id): id is string => id !== null),
+        );
+      }
+
+      // Check which posts are liked and bookmarked by the user
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userId ? userLikes.has(post.id) : false,
+        isBookmarked: userId ? userBookmarks.has(post.id) : false,
       }));
 
       const totalPages = Math.ceil(total / limit);
@@ -834,7 +891,7 @@ export class PostsService {
       };
 
       return {
-        data: postsWithLikes as (Post & { isLiked: boolean } & Record<
+        data: postsWithLikes as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<
             string,
             any
           >)[],
@@ -915,7 +972,8 @@ export class PostsService {
                 isPublic: true,
               },
         )
-        .orderBy(`post.${safeSortBy}`, safeSortOrder)
+        .orderBy('post.isPinned', 'DESC') // Pinned posts first
+        .addOrderBy(`post.${safeSortBy}`, safeSortOrder) // Then by selected sort field
         .skip(skip)
         .take(limit);
 
@@ -938,10 +996,27 @@ export class PostsService {
         );
       }
 
-      // Check which posts are liked by the current user
+      // Batch fetch all bookmarks for the current user if authenticated
+      let userBookmarks: Set<string> = new Set();
+      if (currentUserId && posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const bookmarks = await this.bookmarkRepository.find({
+          where: {
+            userId: currentUserId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userBookmarks = new Set(
+          bookmarks.map((bookmark) => bookmark.postId).filter((id): id is string => id !== null),
+        );
+      }
+
+      // Check which posts are liked and bookmarked by the current user
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: currentUserId ? userLikes.has(post.id) : false,
+        isBookmarked: currentUserId ? userBookmarks.has(post.id) : false,
       }));
 
       const totalPages = Math.ceil(total / limit);
@@ -955,7 +1030,7 @@ export class PostsService {
       };
 
       return {
-        data: postsWithLikes as (Post & { isLiked: boolean } & Record<
+        data: postsWithLikes as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<
             string,
             any
           >)[],
@@ -1072,10 +1147,27 @@ export class PostsService {
         );
       }
 
-      // Check which posts are liked by the feed owner (userId)
+      // Batch fetch all bookmarks for the feed owner (userId)
+      let userBookmarks: Set<string> = new Set();
+      if (posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const bookmarks = await this.bookmarkRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userBookmarks = new Set(
+          bookmarks.map((bookmark) => bookmark.postId).filter((id): id is string => id !== null),
+        );
+      }
+
+      // Check which posts are liked and bookmarked by the feed owner (userId)
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userLikes.has(post.id),
+        isBookmarked: userBookmarks.has(post.id),
       }));
 
       const totalPages = Math.ceil(total / limit);
@@ -1089,7 +1181,7 @@ export class PostsService {
       };
 
       return {
-        data: postsWithLikes as (Post & { isLiked: boolean } & Record<
+        data: postsWithLikes as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<
           string,
           any
         >)[],
@@ -1600,10 +1692,12 @@ export class PostsService {
         );
       }
 
+      // All posts in this list are bookmarked by the user (since we're fetching from bookmarks)
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userLikes.has(post.id),
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+        isBookmarked: true, // All posts in getBookmarkedPosts are bookmarked
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -1669,11 +1763,28 @@ export class PostsService {
           })
         : [];
 
+      // Batch fetch bookmarks for liked posts
+      let userBookmarks: Set<string> = new Set();
+      if (posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const bookmarks = await this.bookmarkRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userBookmarks = new Set(
+          bookmarks.map((bookmark) => bookmark.postId).filter((id): id is string => id !== null),
+        );
+      }
+
       // All posts in this list are liked by the user
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: true,
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+        isBookmarked: userBookmarks.has(post.id),
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -1756,10 +1867,27 @@ export class PostsService {
         );
       }
 
+      // Batch fetch bookmarks
+      let userBookmarks: Set<string> = new Set();
+      if (posts.length > 0) {
+        const postIds = posts.map((p) => p.id);
+        const bookmarks = await this.bookmarkRepository.find({
+          where: {
+            userId,
+            postId: In(postIds),
+          },
+          select: ['postId'],
+        });
+        userBookmarks = new Set(
+          bookmarks.map((bookmark) => bookmark.postId).filter((id): id is string => id !== null),
+        );
+      }
+
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userLikes.has(post.id),
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+        isBookmarked: userBookmarks.has(post.id),
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -1903,7 +2031,7 @@ export class PostsService {
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userId ? userLikes.has(post.id) : false,
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -1997,7 +2125,7 @@ export class PostsService {
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userId ? userLikes.has(post.id) : false,
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -2601,7 +2729,7 @@ export class PostsService {
       const postsWithLikes = posts.map((post) => ({
         ...post,
         isLiked: userLikes.has(post.id),
-      })) as (Post & { isLiked: boolean } & Record<string, any>)[];
+      })) as (Post & { isLiked: boolean; isBookmarked: boolean } & Record<string, any>)[];
 
       const totalPages = Math.ceil(total / limit);
       const meta: PaginationMeta = {
@@ -2638,6 +2766,127 @@ export class PostsService {
       );
 
       throw new InternalServerErrorException('Failed to get collection posts');
+    }
+  }
+
+  /**
+   * Update a collection
+   */
+  async updateCollection(
+    userId: string,
+    collectionId: string,
+    name?: string,
+    description?: string,
+    isPublic?: boolean,
+    coverImage?: string,
+  ): Promise<Collection> {
+    try {
+      // Verify collection exists and user owns it
+      const collection = await this.collectionRepository.findOne({
+        where: { id: collectionId, userId },
+      });
+
+      if (!collection) {
+        throw new NotFoundException('Collection not found');
+      }
+
+      // Update fields if provided
+      if (name !== undefined) {
+        collection.name = sanitizeText(name);
+      }
+      if (description !== undefined) {
+        collection.description = description ? sanitizeText(description) : null;
+      }
+      if (isPublic !== undefined) {
+        collection.isPublic = isPublic;
+      }
+      if (coverImage !== undefined) {
+        collection.coverImage = coverImage ? sanitizeUrl(coverImage) : null;
+      }
+
+      const updatedCollection = await this.collectionRepository.save(collection);
+
+      this.loggingService.log('Collection updated', 'PostsService', {
+        category: LogCategory.USER_MANAGEMENT,
+        userId,
+        metadata: { collectionId },
+      });
+
+      return updatedCollection;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      this.loggingService.error(
+        'Error updating collection',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          userId,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+
+      throw new InternalServerErrorException('Failed to update collection');
+    }
+  }
+
+  /**
+   * Get all collections for a user
+   */
+  async getUserCollections(
+    userId: string,
+    paginationDto?: PaginationDto,
+  ): Promise<{
+    data: Collection[];
+    meta: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasNextPage: boolean;
+      hasPreviousPage: boolean;
+    };
+  }> {
+    try {
+      const page = paginationDto?.page || 1;
+      const limit = paginationDto?.limit || 20;
+      const skip = (page - 1) * limit;
+
+      const [collections, total] = await this.collectionRepository.findAndCount({
+        where: { userId },
+        order: { dateCreated: 'DESC' },
+        take: limit,
+        skip,
+      });
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        data: collections,
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
+      };
+    } catch (error) {
+      this.loggingService.error(
+        'Error getting user collections',
+        error instanceof Error ? error.stack : undefined,
+        'PostsService',
+        {
+          category: LogCategory.DATABASE,
+          error: error instanceof Error ? error : new Error(String(error)),
+          metadata: { userId },
+        },
+      );
+      throw new InternalServerErrorException('Failed to get user collections');
     }
   }
 

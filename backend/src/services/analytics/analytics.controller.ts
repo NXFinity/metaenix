@@ -11,18 +11,20 @@ import {
   ApiTags,
   ApiParam,
   ApiQuery,
-  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { CurrentUser } from '../../security/auth/decorators/currentUser.decorator';
 import { User } from '../../rest/api/users/assets/entities/user.entity';
 import { RequireScope } from '../../security/developer/services/scopes';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { Public } from '../../security/auth/decorators/public.decorator';
 
 @ApiTags('Data Management | Analytics')
 @Controller('analytics')
-@ApiBearerAuth()
 export class AnalyticsController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(
+    private readonly analyticsService: AnalyticsService,
+  ) {}
 
   /**
    * Get geographic analytics for a user's profile views
@@ -88,14 +90,52 @@ export class AnalyticsController {
     return this.analyticsService.getAggregateAnalytics(userId);
   }
 
+
   /**
-   * Get user analytics (cached/calculated)
+   * Get user's liked posts
+   * NOTE: This route must come BEFORE 'users/:userId' to avoid route conflicts
    */
-  @Get('users/:userId')
+  @Get('users/:userId/likes')
   @RequireScope('read:analytics')
   @ApiOperation({
+    summary: 'Get user\'s liked posts',
+    description: 'Returns a paginated list of posts that the user has liked.',
+  })
+  @ApiParam({
+    name: 'userId',
+    description: 'User ID to get liked posts for',
+    type: 'string',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Liked posts retrieved successfully',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - User can only view their own liked posts',
+  })
+  async getUserLikedPosts(
+    @Param('userId') userId: string,
+    @Query() paginationDto: PaginationDto,
+    @CurrentUser() user?: User,
+  ) {
+    if (!user || user.id !== userId) {
+      throw new UnauthorizedException('You can only view your own liked posts');
+    }
+    return this.analyticsService.getUserLikedPosts(userId, paginationDto);
+  }
+
+  /**
+   * Get user analytics (cached/calculated)
+   * Public endpoint - anyone can view any user's analytics
+   */
+  @Get('users/:userId')
+  @Public()
+  @ApiOperation({
     summary: 'Get user analytics',
-    description: 'Returns cached user analytics. Automatically recalculates if stale.',
+    description: 'Returns cached user analytics. Automatically recalculates if stale. Public endpoint - anyone can view any user\'s analytics.',
   })
   @ApiParam({
     name: 'userId',
@@ -112,18 +152,10 @@ export class AnalyticsController {
     status: 200,
     description: 'User analytics retrieved successfully',
   })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - User can only view their own analytics',
-  })
   async getUserAnalytics(
     @Param('userId') userId: string,
     @Query('forceRecalculate') forceRecalculate?: string,
-    @CurrentUser() user?: User,
   ) {
-    if (!user || user.id !== userId) {
-      throw new UnauthorizedException('You can only view your own analytics');
-    }
     return this.analyticsService.getUserAnalytics(
       userId,
       forceRecalculate === 'true',
@@ -195,33 +227,35 @@ export class AnalyticsController {
   }
 
   /**
-   * Get analytics for a specific resource
+   * Get photo analytics for a user
    */
-  @Get('resources/:resourceType/:resourceId')
+  @Get('users/:userId/photos')
   @RequireScope('read:analytics')
   @ApiOperation({
-    summary: 'Get resource analytics',
-    description: 'Returns analytics for a specific resource (post, video, etc.).',
+    summary: 'Get photo analytics for user',
+    description: 'Returns analytics for all photos by the user.',
   })
   @ApiParam({
-    name: 'resourceType',
-    description: 'Resource type (post, video, etc.)',
-    type: 'string',
-  })
-  @ApiParam({
-    name: 'resourceId',
-    description: 'Resource ID',
+    name: 'userId',
+    description: 'User ID to get analytics for',
     type: 'string',
   })
   @ApiResponse({
     status: 200,
-    description: 'Resource analytics retrieved successfully',
+    description: 'Photo analytics retrieved successfully',
   })
-  async getResourceAnalytics(
-    @Param('resourceType') resourceType: string,
-    @Param('resourceId') resourceId: string,
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - User can only view their own analytics',
+  })
+  async getUserPhotoAnalytics(
+    @Param('userId') userId: string,
+    @CurrentUser() user?: User,
   ) {
-    return this.analyticsService.getResourceAnalytics(resourceType, resourceId);
+    if (!user || user.id !== userId) {
+      throw new UnauthorizedException('You can only view your own analytics');
+    }
+    return this.analyticsService.getUserPhotoAnalytics(userId);
   }
 
   /**
@@ -288,6 +322,40 @@ export class AnalyticsController {
   ) {
     return this.analyticsService.getVideoAnalytics(
       videoId,
+      forceRecalculate === 'true',
+    );
+  }
+
+  /**
+   * Get analytics for a specific photo
+   */
+  @Get('photos/:photoId')
+  @RequireScope('read:analytics')
+  @ApiOperation({
+    summary: 'Get photo analytics',
+    description: 'Returns analytics for a specific photo. Automatically recalculates if stale.',
+  })
+  @ApiParam({
+    name: 'photoId',
+    description: 'Photo ID to get analytics for',
+    type: 'string',
+  })
+  @ApiQuery({
+    name: 'forceRecalculate',
+    description: 'Force recalculation of analytics',
+    type: 'boolean',
+    required: false,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Photo analytics retrieved successfully',
+  })
+  async getPhotoAnalyticsById(
+    @Param('photoId') photoId: string,
+    @Query('forceRecalculate') forceRecalculate?: string,
+  ) {
+    return this.analyticsService.getPhotoAnalytics(
+      photoId,
       forceRecalculate === 'true',
     );
   }

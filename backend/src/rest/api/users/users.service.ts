@@ -660,6 +660,17 @@ export class UsersService {
           throw new NotFoundException(`User with id ${userId} not found`);
         }
 
+        // Calculate actual counts from Follow table to ensure accuracy
+        const followRepository = this.userRepository.manager.getRepository(Follow);
+        const [actualFollowersCount, actualFollowingCount] = await Promise.all([
+          followRepository.count({
+            where: { followingId: userId },
+          }),
+          followRepository.count({
+            where: { followerId: userId },
+          }),
+        ]);
+
         // Remove password and sensitive security fields from response
         const { password, ...userWithoutPassword } = userData;
         
@@ -678,7 +689,12 @@ export class UsersService {
           userWithoutPassword.security = safeSecurity as any;
         }
 
-        return userWithoutPassword as User;
+        // Update the user object with actual counts
+        return {
+          ...userWithoutPassword,
+          followersCount: actualFollowersCount,
+          followingCount: actualFollowingCount,
+        } as User;
       };
 
       // Try to get from cache first

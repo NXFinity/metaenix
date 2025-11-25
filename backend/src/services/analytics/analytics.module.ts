@@ -6,11 +6,12 @@ import { ViewTrack } from '../tracking/assets/entities/view-track.entity';
 import { UserAnalytics } from './assets/entities';
 import { PostAnalytics } from './assets/entities';
 import { VideoAnalytics } from './assets/entities';
+import { PhotoAnalytics } from './assets/entities';
 import { LoggingModule } from '@logging/logging';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ViewTrack, UserAnalytics, PostAnalytics, VideoAnalytics]),
+    TypeOrmModule.forFeature([ViewTrack, UserAnalytics, PostAnalytics, VideoAnalytics, PhotoAnalytics]),
     LoggingModule,
   ],
   controllers: [AnalyticsController],

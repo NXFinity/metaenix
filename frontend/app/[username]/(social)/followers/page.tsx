@@ -3,15 +3,15 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { userService } from '@/core/api/user';
-import { followsService } from '@/core/api/follows';
+import { userService } from '@/core/api/users/user';
+import { followsService } from '@/core/api/users/follows';
 import { useAuth } from '@/core/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/theme/ui/card';
 import { Button } from '@/theme/ui/button';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeftIcon, UserPlusIcon, UserMinusIcon } from 'lucide-react';
-import type { FollowUser } from '@/core/api/follows/types/follow.type';
+import type { FollowUser } from '@/core/api/users/follows/types/follow.type';
 
 export default function FollowersPage() {
   const { username } = useParams();
@@ -36,10 +36,24 @@ export default function FollowersPage() {
   const {
     data: followersData,
     isLoading: isLoadingFollowers,
+    error: followersError,
   } = useQuery({
     queryKey: ['followers', user?.id, page],
     queryFn: () => followsService.getFollowers(user!.id, { page, limit }),
     enabled: !!user?.id,
+    retry: (failureCount, error: unknown) => {
+      // Don't retry on connection errors, 403 (Forbidden) or 404 (Not Found) errors
+      const httpError = error as { code?: string; response?: { status?: number } };
+      if (
+        httpError?.code === 'ERR_CONNECTION_REFUSED' ||
+        httpError?.code === 'ECONNREFUSED' ||
+        httpError?.response?.status === 403 ||
+        httpError?.response?.status === 404
+      ) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
 
   // Follow mutation
@@ -112,7 +126,17 @@ export default function FollowersPage() {
         </div>
 
         {/* Followers List */}
-        {isLoadingFollowers ? (
+        {followersError ? (
+          <Card>
+            <CardContent className="text-center py-12">
+              <p className="text-muted-foreground">
+                {followersError instanceof Error && followersError.message.includes('404')
+                  ? 'User not found'
+                  : 'Failed to load followers'}
+              </p>
+            </CardContent>
+          </Card>
+        ) : isLoadingFollowers ? (
           <div className="text-center py-8 text-muted-foreground">Loading followers...</div>
         ) : followersData && followersData.data.length > 0 ? (
           <div className="space-y-4">

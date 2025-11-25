@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { tokenStorage } from '@/lib/auth/token-storage';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -31,6 +31,22 @@ apiClient.interceptors.request.use((config) => {
   
   return config;
 });
+
+// Handle 401 Unauthorized errors globally - token invalidated or expired
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    // Handle 401 Unauthorized - token invalidated, expired, or session terminated
+    if (error.response?.status === 401) {
+      // Clear tokens immediately - this will be handled by useAuth hook
+      // Don't redirect here - let React Query and useAuth handle it
+      // to avoid conflicts with logout flow
+      tokenStorage.clearTokens();
+    }
+    
+    return Promise.reject(error);
+  }
+);
 
 export { apiClient };
 export default apiClient;

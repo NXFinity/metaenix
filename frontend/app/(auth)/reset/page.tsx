@@ -131,6 +131,7 @@ export default function ResetPage() {
               width={180}
               height={60}
               className="h-12 w-auto mx-auto"
+              style={{ width: 'auto' }}
               priority
             />
           </Link>
@@ -337,6 +338,7 @@ function ForgotPasswordForm() {
               width={180}
               height={60}
               className="h-12 w-auto mx-auto"
+              style={{ width: 'auto' }}
               priority
             />
           </Link>

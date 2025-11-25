@@ -37,5 +37,10 @@ export interface JwtPayload {
    * Token expiration (timestamp)
    */
   exp?: number;
+
+  /**
+   * Token version (for invalidation)
+   */
+  tokenVersion?: number;
 }
 
